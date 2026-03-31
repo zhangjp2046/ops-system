@@ -1,0 +1,423 @@
+{
+  "plugin_id": "hospital.assets",
+  "name": "医院资产插件",
+  "version": "1.0.0",
+  "type": "asset",
+  "description": "医院IT资产管理系统插件，支持医院服务器、网络、安全、存储等设备管理",
+  "author": "运维系统团队",
+  "license": "MIT",
+  
+  "dependencies": ["core.assets"],
+  
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "hospital_code": {
+        "type": "string",
+        "title": "医院编码",
+        "description": "医院的唯一编码，如CSWSY、THDQYY",
+        "required": true
+      },
+      "hospital_name": {
+        "type": "string",
+        "title": "医院名称",
+        "description": "医院的完整名称",
+        "required": true
+      },
+      "asset_prefix": {
+        "type": "string",
+        "title": "资产编号前缀",
+        "description": "资产编号的前缀，如CS-、TH-",
+        "default": ""
+      },
+      "default_location": {
+        "type": "string",
+        "title": "默认位置",
+        "description": "资产的默认位置",
+        "default": "机房"
+      }
+    }
+  },
+  
+  "assets_schema": {
+    "server": {
+      "name": "服务器",
+      "icon": "server",
+      "color": "#1890ff",
+      "fields": [
+        {
+          "field_code": "server_type",
+          "field_name": "服务器类型",
+          "field_type": "select",
+          "field_label": "服务器类型",
+          "is_required": true,
+          "options": [
+            {"value": "PHYSICAL_SERVER", "label": "物理服务器"},
+            {"value": "VIRTUAL_MACHINE", "label": "虚拟机"},
+            {"value": "CLOUD_DESKTOP", "label": "云桌面"},
+            {"value": "HYPERVISOR", "label": "虚拟化平台"}
+          ]
+        },
+        {
+          "field_code": "host_name",
+          "field_name": "主机名",
+          "field_type": "string",
+          "field_label": "主机名",
+          "is_required": true
+        },
+        {
+          "field_code": "ip_address",
+          "field_name": "IP地址",
+          "field_type": "string",
+          "field_label": "IP地址",
+          "validation_rules": {
+            "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+          }
+        },
+        {
+          "field_code": "os_type",
+          "field_name": "操作系统类型",
+          "field_type": "select",
+          "field_label": "操作系统类型",
+          "options": [
+            {"value": "Windows", "label": "Windows"},
+            {"value": "Linux", "label": "Linux"},
+            {"value": "ESXi", "label": "VMware ESXi"},
+            {"value": "HyperV", "label": "Hyper-V"},
+            {"value": "Sangfor", "label": "深信服超融合"}
+          ]
+        },
+        {
+          "field_code": "os_name",
+          "field_name": "操作系统名称",
+          "field_type": "string",
+          "field_label": "操作系统名称"
+        },
+        {
+          "field_code": "cpu_cores",
+          "field_name": "CPU核心数",
+          "field_type": "number",
+          "field_label": "CPU核心数",
+          "validation_rules": {
+            "min": 1,
+            "max": 256
+          }
+        },
+        {
+          "field_code": "memory_gb",
+          "field_name": "内存大小(GB)",
+          "field_type": "number",
+          "field_label": "内存大小(GB)"
+        },
+        {
+          "field_code": "disk_gb",
+          "field_name": "磁盘大小(GB)",
+          "field_type": "number",
+          "field_label": "磁盘大小(GB)"
+        },
+        {
+          "field_code": "admin_account",
+          "field_name": "管理员账户",
+          "field_type": "string",
+          "field_label": "管理员账户"
+        },
+        {
+          "field_code": "admin_password",
+          "field_name": "管理员密码",
+          "field_type": "password",
+          "field_label": "管理员密码"
+        },
+        {
+          "field_code": "virtualization_platform",
+          "field_name": "虚拟化平台",
+          "field_type": "string",
+          "field_label": "虚拟化平台"
+        },
+        {
+          "field_code": "database_type",
+          "field_name": "数据库类型",
+          "field_type": "string",
+          "field_label": "数据库类型"
+        }
+      ]
+    },
+    
+    "network": {
+      "name": "网络设备",
+      "icon": "network",
+      "color": "#52c41a",
+      "fields": [
+        {
+          "field_code": "device_type",
+          "field_name": "设备类型",
+          "field_type": "select",
+          "field_label": "设备类型",
+          "is_required": true,
+          "options": [
+            {"value": "SWITCH", "label": "交换机"},
+            {"value": "ROUTER", "label": "路由器"},
+            {"value": "FIREWALL", "label": "防火墙"}
+          ]
+        },
+        {
+          "field_code": "ip_address",
+          "field_name": "IP地址",
+          "field_type": "string",
+          "field_label": "IP地址",
+          "is_required": true
+        },
+        {
+          "field_code": "model",
+          "field_name": "型号",
+          "field_type": "string",
+          "field_label": "型号"
+        },
+        {
+          "field_code": "firmware_version",
+          "field_name": "固件版本",
+          "field_type": "string",
+          "field_label": "固件版本"
+        },
+        {
+          "field_code": "port_count",
+          "field_name": "端口数量",
+          "field_type": "number",
+          "field_label": "端口数量"
+        },
+        {
+          "field_code": "admin_account",
+          "field_name": "管理员账户",
+          "field_type": "string",
+          "field_label": "管理员账户"
+        }
+      ]
+    },
+    
+    "security": {
+      "name": "安全设备",
+      "icon": "security",
+      "color": "#fa8c16",
+      "fields": [
+        {
+          "field_code": "security_type",
+          "field_name": "安全设备类型",
+          "field_type": "select",
+          "field_label": "安全设备类型",
+          "is_required": true,
+          "options": [
+            {"value": "FIREWALL", "label": "防火墙"},
+            {"value": "IPS", "label": "入侵防御系统"},
+            {"value": "IDS", "label": "入侵检测系统"},
+            {"value": "AUDIT", "label": "审计系统"},
+            {"value": "ANTIVIRUS", "label": "杀毒软件"}
+          ]
+        },
+        {
+          "field_code": "ip_address",
+          "field_name": "IP地址",
+          "field_type": "string",
+          "field_label": "IP地址",
+          "is_required": true
+        },
+        {
+          "field_code": "model",
+          "field_name": "型号",
+          "field_type": "string",
+          "field_label": "型号"
+        },
+        {
+          "field_code": "license_key",
+          "field_name": "许可证密钥",
+          "field_type": "string",
+          "field_label": "许可证密钥"
+        },
+        {
+          "field_code": "license_expiry",
+          "field_name": "许可证到期",
+          "field_type": "date",
+          "field_label": "许可证到期"
+        },
+        {
+          "field_code": "admin_account",
+          "field_name": "管理员账户",
+          "field_type": "string",
+          "field_label": "管理员账户"
+        }
+      ]
+    },
+    
+    "storage": {
+      "name": "存储设备",
+      "icon": "storage",
+      "color": "#722ed1",
+      "fields": [
+        {
+          "field_code": "storage_type",
+          "field_name": "存储类型",
+          "field_type": "select",
+          "field_label": "存储类型",
+          "is_required": true,
+          "options": [
+            {"value": "SAN", "label": "存储区域网络"},
+            {"value": "NAS", "label": "网络附加存储"},
+            {"value": "BACKUP", "label": "备份设备"}
+          ]
+        },
+        {
+          "field_code": "ip_address",
+          "field_name": "IP地址",
+          "field_type": "string",
+          "field_label": "IP地址"
+        },
+        {
+          "field_code": "total_capacity_tb",
+          "field_name": "总容量(TB)",
+          "field_type": "number",
+          "field_label": "总容量(TB)"
+        },
+        {
+          "field_code": "used_capacity_tb",
+          "field_name": "已用容量(TB)",
+          "field_type": "number",
+          "field_label": "已用容量(TB)"
+        },
+        {
+          "field_code": "raid_level",
+          "field_name": "RAID级别",
+          "field_type": "string",
+          "field_label": "RAID级别"
+        },
+        {
+          "field_code": "admin_account",
+          "field_name": "管理员账户",
+          "field_type": "string",
+          "field_label": "管理员账户"
+        }
+      ]
+    },
+    
+    "infrastructure": {
+      "name": "基础设施",
+      "icon": "infrastructure",
+      "color": "#13c2c2",
+      "fields": [
+        {
+          "field_code": "infra_type",
+          "field_name": "基础设施类型",
+          "field_type": "select",
+          "field_label": "基础设施类型",
+          "is_required": true,
+          "options": [
+            {"value": "UPS", "label": "不间断电源"},
+            {"value": "AC", "label": "精密空调"},
+            {"value": "MONITOR", "label": "动环监控"}
+          ]
+        },
+        {
+          "field_code": "power_capacity_kva",
+          "field_name": "电力容量(kVA)",
+          "field_type": "number",
+          "field_label": "电力容量(kVA)"
+        },
+        {
+          "field_code": "cooling_capacity_kw",
+          "field_name": "制冷容量(kW)",
+          "field_type": "number",
+          "field_label": "制冷容量(kW)"
+        },
+        {
+          "field_code": "runtime_hours",
+          "field_name": "运行时间(小时)",
+          "field_type": "number",
+          "field_label": "运行时间(小时)"
+        },
+        {
+          "field_code": "last_maintenance_date",
+          "field_name": "最后维护日期",
+          "field_type": "date",
+          "field_label": "最后维护日期"
+        }
+      ]
+    }
+  },
+  
+  "monitoring_schema": {
+    "server_ping": {
+      "name": "服务器Ping监控",
+      "description": "检查服务器是否可达",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "type": "number",
+            "title": "超时时间(秒)",
+            "default": 5
+          },
+          "retry_count": {
+            "type": "number",
+            "title": "重试次数",
+            "default": 3
+          }
+        }
+      }
+    },
+    
+    "server_performance": {
+      "name": "服务器性能监控",
+      "description": "监控服务器CPU、内存、磁盘使用率",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "check_cpu": {
+            "type": "boolean",
+            "title": "检查CPU",
+            "default": true
+          },
+          "check_memory": {
+            "type": "boolean",
+            "title": "检查内存",
+            "default": true
+          },
+          "check_disk": {
+            "type": "boolean",
+            "title": "检查磁盘",
+            "default": true
+          },
+          "warning_threshold": {
+            "type": "number",
+            "title": "警告阈值(%)",
+            "default": 80
+          },
+          "critical_threshold": {
+            "type": "number",
+            "title": "严重阈值(%)",
+            "default": 90
+          }
+        }
+      }
+    }
+  },
+  
+  "alert_schema": {
+    "server_down": {
+      "name": "服务器宕机",
+      "description": "服务器无法访问时触发告警",
+      "severity": "CRITICAL",
+      "condition": "server_ping.status == 'FAILED'"
+    },
+    
+    "high_cpu_usage": {
+      "name": "CPU使用率过高",
+      "description": "CPU使用率超过阈值时触发告警",
+      "severity": "WARNING",
+      "condition": "server_performance.cpu_usage > 80"
+    },
+    
+    "high_memory_usage": {
+      "name": "内存使用率过高",
+      "description": "内存使用率超过阈值时触发告警",
+      "severity": "WARNING",
+      "condition": "server_performance.memory_usage > 80"
+    }
+  }
+}

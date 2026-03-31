@@ -1,0 +1,371 @@
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Tue Apr 15 21:20:20 2025 +0100
+
+    dblib: Fix dbreadtext crash on NULL values
+
+    NULL values have column_cur_size < 0.
+    Do not use negative values for size, thread NULL values has having
+    size zero. This will cause dbreadtext to return 0, which is the
+    correct value.
+
+Author: Rui Chen <rui@chenrui.dev>
+Date:   Thu Jan 23 21:01:46 2025 -0500
+
+    fix signature mismatch for tds_convert_int1
+
+Merge: dbbccd23 7153535b
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Jan 23 07:41:31 2025 +0000
+
+    Merge fix for SQL_C_STINYINT
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Wed Jan 22 15:57:46 2025 +0000
+
+    odbc: Add test for SQL_C_STINYINT type
+
+    Tested also with Microsoft driver.
+    TestInput tests both SQLFetch and SQLBindParameter.
+
+Author: Vadim Zeitlin <vz-soci@zeitlins.org>
+Date:   Wed Jan 22 16:58:00 2025 +0100
+
+    Fix handling of SQL_C_STINYINT
+
+    Map it to SYBSINT1 so that it is stored as signed, and not unsigned as
+    before, in the database.
+
+    Closes #627.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Jan 16 17:41:38 2025 +0000
+
+    tds: Add support for SYBSINT1 type conversion
+
+    Never personally encountered but won't hurt.
+
+Merge: eebd082f a11c79cc
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Mon Dec 9 23:17:25 2024 +0000
+
+    Merge support for BLK_HINTS calling blk_props
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Dec 8 13:03:22 2024 +0000
+
+    ctlib: Add support for setting hints for bulk copy
+
+    This is an extension as Sybase does not support hints.
+    Microsoft supports hints using bcp_control.
+    Hints are passed as a string using blk_props.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Dec 5 18:12:50 2024 +0000
+
+    Make TDSBCPINFO::hint a DSTR
+
+    Allows more flexibility, not just a constant string.
+
+Merge: 63b19f38 836440e0
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Sep 29 14:53:19 2024 +0100
+
+    Merge fix for connection to no Sybase servers
+
+    There are some servers implementing TDS but not supporting much queries.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Wed Sep 25 22:12:13 2024 +0100
+
+    Ignore query errors during connection initial setup
+
+    Not all servers support the queries we try.
+    In particular some not Sybase server seems to reject most of them.
+    In case of failure execute one query at a time ignoring errors if
+    we don't need a correct result.
+
+Author: Aaron M. Ucko <ucko@ncbi.nlm.nih.gov>
+Date:   Wed Aug 28 16:48:41 2024 -0400
+
+    tds_setup_connection: Further conditionalize queries by product.
+
+    Skip NVC and UVC queries under SQL Anywhere too and SPID query under
+    OpenServer too.  To that end, pull out local is_anywhere and
+    is_openserver variables.
+
+Author: Aaron M. Ucko <ucko@ncbi.nlm.nih.gov>
+Date:   Thu May 9 14:23:58 2024 -0400
+
+    tds_setup_connection: Skip nvc/uvc check under OpenServer.
+
+    OpenServer instances may well report "Unknown language request" for
+    it, resulting in outright login failures.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Tue Jul 23 22:21:07 2024 +0100
+
+    pool: Ignore extension in login packet
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Jul 19 14:58:25 2024 +0100
+
+    odbc: Fix bug cancelling not active statements
+
+    Do not use ODBC_EXIT_ to avoid crashes.
+    Return SQL_SUCCESS as MS ODBC (and specifications).
+
+Merge: f967c478 9c07f185
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Mon Jul 15 13:35:39 2024 +0100
+
+    Merge leak fix for odbc_parse_connect_string
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat Jul 13 12:17:46 2024 +0100
+
+    odbc: Reuse cleanup code parsing connection string, check for error
+
+    Reuse cleanup code in odbc_parse_connect_string.
+    Code had a potential leak, remove and check it.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Nov 26 21:52:25 2023 +0000
+
+    odbc: Use tds_dstr_buf to retrieve internal string buffer
+
+    Do not use tds_dstr_cstr and a cast if the intention is to use
+    the internal string buffer.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Wed Sep 27 13:13:00 2023 +0100
+
+    odbc: Reuse code in connection_string_parse test
+
+    Most of the code was just repeated.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Wed Sep 27 12:33:01 2023 +0100
+
+    odbc: Add test for connection string parsing
+
+    Check parsing of not semicolon terminated parameter.
+
+Author: Aaron M. Ucko <ucko@ncbi.nlm.nih.gov>
+Date:   Wed Jul 3 14:33:05 2024 -0400
+
+    tds_convert_to_binary: Don't leak allocations on syntax errors.
+
+    If tds_char2hex reported a syntax error and we'd (as usual) allocated
+    a buffer, free it on the way out so that callers won't have to account
+    for this corner case themselves, taking care to avoid leaving a
+    dangling pointer in the conversion-result union.
+
+Author: Aaron M. Ucko <ucko@ncbi.nlm.nih.gov>
+Date:   Wed Jul 3 14:20:00 2024 -0400
+
+    _cs_convert: Cap binary/image copying to the destination length.
+
+    Excessively long input already yielded an error, but would previously
+    overrun the destination buffer along the way.
+
+Author: Aaron M. Ucko <ucko@ncbi.nlm.nih.gov>
+Date:   Mon May 13 11:49:03 2024 -0400
+
+    _blk_get_col_data: Consistently return TDS_FAIL on failure.
+
+    Most failure scenarios accidentally returned CS_FAIL, which ironically
+    corresponds to TDS_SUCCESS.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat May 25 11:55:23 2024 +0100
+
+    Support very old Sybase ASE versions
+
+    On these old versions EXECUTE statement with string is not supported,
+    and neither UNIVARCHAR.
+
+Author: john-kendall <john@capps.com>
+Date:   Thu May 23 11:15:26 2024 -0700
+
+    datacopy: Increase CREATE TABLE command buffer to accommodate larger queries
+
+    datacopy fails on tables with an unusually high number of columns.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri May 17 10:34:01 2024 +0100
+
+    Change some file license from GPL to LGPL
+
+    These files were wrongly licensed, they are designed to be used
+    by other code that needs to be LGPL.
+    I'm the single owner of these files so no extra need for
+    permissions.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Apr 28 13:47:14 2024 +0100
+
+    Support Sybase server not configured with UTF-8 charset
+
+    If server is configured to not use UTF-8 UNIVARCHAR type is not
+    available. Split query to check types and handle results
+    separately.
+
+Merge: 660c99ee 3585d56f
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Mar 31 18:58:35 2024 +0100
+
+    Merge updates to defncopy into Branch-1_4
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Mar 29 11:20:06 2024 +0000
+
+    defncopy: Add test for the applications
+
+    Use commands calling programs.
+    Mainly use tsql to create some table, output definition with
+    defncopy and check definition is as expected.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Mar 31 18:13:39 2024 +0100
+
+    defncopy: Quote key index names
+
+    Split index keys considering current column names.
+    This is more complicated than just split considering separator
+    (command and space, ", ") however it supports weird cases where
+    we have the separator in the middle of a column name.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat Mar 30 17:24:40 2024 +0000
+
+    defncopy: Fix for order of index recordset
+
+    The order of columns is different between MS and Sybase.
+    Also separate code in a function, it was too long.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat Mar 30 21:15:20 2024 +0000
+
+    defncopy: Trim spaces around nullable flags
+
+    This fix detection of nullable columns for Sybase.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Mar 24 09:58:01 2024 +0000
+
+    defncopy: Quote strings and identifiers
+
+    Allows to handle weird characters (like spaces) in strings and
+    identifiers.
+    Handle memory marking in a list to easily free. I plan to move
+    that part of code to common code.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat Mar 30 10:40:54 2024 +0000
+
+    defncopy: Fix MS column length for N(VAR)CHAR types
+
+    The length from sp_help is in bytes, not in code units.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Mar 28 16:36:19 2024 +0000
+
+    defncopy: Use memory instead of temporary file
+
+    Index script is not that huge, just allocate in memory.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Mar 28 16:35:28 2024 +0000
+
+    ctlib: Fix crash using ct_command with CS_MORE option
+
+    The tds_realloc call was wrong passing the wrong pointer.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sun Dec 3 08:58:39 2023 +0000
+
+    Do not try to use pthread_cond_timedwait_relative_np on newer Android
+
+    API was deprecated, do not use (still available on Apple).
+    Rename USE_CLOCK_IN_COND to USE_CLOCK_GETTIME_IN_COND to make
+    more clear.
+    Put check for pthread_cond_timedwait_relative_np in a single
+    place defining a new USE_COND_TIMEDWAIT_RELATIVE if we can use
+    it.
+    Declare tv variable near gettimeofday to reduce conditional
+    compilation.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Nov 24 19:12:44 2023 +0000
+
+    Get Windows code page using Windows API
+
+    Instead of using setlocale call use GetLocaleInfoA.
+    This fixes getting Windows code page.
+    setlocale should return the code page number as first item
+    but it depends on too many settings and sometimes the string
+    does not start with the code page number.
+    Updated ODBC test to avoid not convertible character; note that
+    now the behaviour is more coherent to Windows driver for this test.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Nov 24 08:11:36 2023 +0000
+
+    odbc: Return better error for invalid character set
+
+    Do not return memory error which is pretty misleading.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Nov 23 19:49:53 2023 +0000
+
+    tds: Set control method for final OpenSSL BIO
+
+    OpenSSL sometimes calls this callback failing if not present.
+    This fixes https://github.com/FreeTDS/freetds/issues/513.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Oct 27 05:29:51 2023 +0100
+
+    odbc: Fix getting SQL_ATTR_METADATA_ID attribute
+
+    Returned wrong field due to typo.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Sat Oct 21 11:47:35 2023 +0100
+
+    tds: Fix possible issue with 32 bit machines using BCP
+
+    The -2 constant should be signed extended to 64 bit and passed
+    to tds_put_int8. This potentially does not happen on 32 bit
+    as the ?: operator would return a size_t (unsigned 32 bit on
+    32 bit systems).
+    Force the type to get the correct value.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Thu Oct 19 18:10:55 2023 +0100
+
+    odbc: Fix type setting
+
+    The code was falling through the cases potentially setting
+    wrong types.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Fri Oct 13 11:37:58 2023 +0100
+
+    tds: Fix conversion from NUMERIC -0 number to integers
+
+    The weird number encoding failed to be converted to integers
+    and was detected as overflow.
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Tue Sep 26 20:58:18 2023 +0100
+
+    tls: Fix certificate hostname check for OpenSSL
+
+Author: Frediano Ziglio <freddy77@gmail.com>
+Date:   Tue Sep 26 11:38:01 2023 +0100
+
+    Update Autoconf to 2.71
+
+    Add some compatibility for MacOS.
+

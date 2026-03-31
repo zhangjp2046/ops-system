@@ -1,0 +1,260 @@
+<table id="dblib.api"> <title>&dblib; API Implementation Summary</title>
+ <!-- table heading -->
+ <tgroup cols="4"><thead><row> <entry>Category</entry> <entry>Microsoft name</entry><entry>Sybase name</entry> <entry>Status</entry> <entry>Comments</entry> </row></thead> 
+ <tbody>
+ <row><entry>(none)   </entry> <entry>n/a</entry> <entry>db12hour</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbaltbind_ps</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbbind_ps</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbbufsize</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbcharsetconv</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbcoltypeinfo</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbconvert_ps</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbfreesort</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbfree_xlate</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbgetcharset</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbgetloginfo</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbgetlusername</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbgetnatlang</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>DBIORDESC</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>DBIOWDESC</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbloadsort</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbload_xlate</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbnpcreate</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbnpdefine</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbpoll</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>DBRBUF</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbreadpage</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbrecftos</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbrecvpassthru</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregdrop</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregexec</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbreghandle</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbreginit</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbreglist</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregnowatch</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregparam</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregwatch</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbregwatchlist</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbrpwclr</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbrpwset</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsafestr</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsechandle</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsendpassthru</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetbusy</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetdefcharset</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetdeflang</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetidle</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetifile</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetinterrupt</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>DBSETLCHARSET</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>DBSETLENCRYPT</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetloginfo</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetrow</entry> <entry>OK</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsetversion</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbspr1row</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbspr1rowlen</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsprhead</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbsprline</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbstrcmp</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbstrsort</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbtextsize</entry> <entry></entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbwritepage</entry> <entry>never</entry></row>
+<row><entry>(none)   </entry> <entry>n/a</entry> <entry>dbxlate</entry> <entry>never</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_batch</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_bind</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_colfmt</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>n/a</entry> <entry>bcp_colfmt_ps</entry> <entry></entry></row>
+<row><entry>bcp      </entry> <entry>bcp_collen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_colptr</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_columns</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_control</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_done</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_exec</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>n/a</entry> <entry>bcp_getl</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_init</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_moretext</entry> <entry>(same)</entry> <entry>stub</entry></row>
+<row><entry>bcp      </entry> <entry>n/a</entry> <entry>bcp_options</entry> <entry>partial</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_readfmt</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_sendrow</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>BCP_SETL</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>bcp      </entry> <entry>bcp_writefmt</entry> <entry>(same)</entry> <entry></entry></row>
+<row><entry>browse   </entry> <entry>dbcolbrowse</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbcolsource</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbfreequal</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbqual</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtabbrowse</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtabcount</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtabname</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtabsource</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtsnewlen</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtsnewval</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>browse   </entry> <entry>dbtsput</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbadata</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbadlen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbaltbind</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbaltcolid</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbaltlen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbaltop</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbalttype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbaltutype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbanullbind</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbbind</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbbylist</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcancel</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcanquery</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbchange</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbclose</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbclrbuf</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbclropt</entry> <entry>(same)</entry> <entry>partial</entry></row>
+<row><entry>core     </entry> <entry>dbcmd</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcmdrow</entry> <entry>DBCMDROW</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcolinfo</entry> <entry>n/a</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcollen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcolname</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcoltype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcolutype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbconvert</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcount</entry> <entry>DBCOUNT</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbcurcmd</entry> <entry>DBCURCMD</entry> <entry>stub</entry></row>
+<row><entry>core     </entry> <entry>dbcurrow</entry> <entry>DBCURROW</entry> <entry>stub</entry></row>
+<row><entry>core     </entry> <entry>dbdata</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbdataready</entry> <entry>n/a</entry> <entry></entry></row>
+<row><entry>core     </entry> <entry>dbdatecrack</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbdatlen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbdead</entry> <entry>DBDEAD</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbenlisttrans</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbenlistxatrans</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dberrhandle</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbexit</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbfcmd</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbfirstrow</entry> <entry>DBFIRSTROW</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbfreebuf</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgetchar</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgetmaxprocs</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgetoff</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbgetpacket</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgetrow</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgettime</entry> <entry>DBGETTIME</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbgetuserdata</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbinit</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbisavail</entry> <entry>DBISAVAIL</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbiscount</entry> <entry>n/a</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbisopt</entry> <entry>(same)</entry> <entry>partial</entry></row>
+<row><entry>core     </entry> <entry>dblastrow</entry> <entry>DBLASTROW</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dblogin</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbfreelogin</entry> <entry>dbloginfree</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4add</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4cmp</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4copy</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4divide</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4minus</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4mul</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4sub</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmny4zero</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyadd</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnycmp</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnycopy</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnydec</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnydivide</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnydown</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyinc</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyinit</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnymaxneg</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnymaxpos</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyminus</entry> <entry>OK</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnymul</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyndigit</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyscale</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnysub</entry> <entry>stub</entry></row>
+<row><entry>money</entry> <entry>n/a</entry> <entry>dbmnyzero</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbmorecmds</entry> <entry>DBMORECMDS</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbmsghandle</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbname</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnextrow</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnullbind</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnumalts</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnumcols</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnumcompute</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbnumorders</entry> <entry>DBNUMORDERS</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbopen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbordercol</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbprhead</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbprocerrhandle</entry> <entry>n/a</entry> <entry>aliases dberrhandle</entry></row>
+<row><entry>core     </entry> <entry>dbprocinfo</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbprocmsghandle</entry> <entry>n/a</entry> <entry>aliases dbmsghandle</entry></row>
+<row><entry>core     </entry> <entry>dbprrow</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbprtype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbresults</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbrows</entry> <entry>DBROWS</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbrowtype</entry> <entry>DBROWTYPE</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>n/a</entry> <entry>dbservcharset</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbserverenum</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbsetavail</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlapp</entry> <entry>DBSETLAPP</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlfallback</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>core     </entry> <entry>dbsetlhost</entry> <entry>DBSETLHOST</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlnatlang</entry> <entry>DBSETLNATLANG</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlogintime</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlpacket</entry> <entry>DBSETLPACKET</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlpwd</entry> <entry>DBSETLPWD</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlsecure</entry> <entry>n/a</entry> <entry></entry></row>
+<row><entry>core     </entry> <entry>dbsetltime</entry> <entry>n/a</entry> <entry></entry></row>
+<row><entry>core     </entry> <entry>dbsetluser</entry> <entry>DBSETLUSER</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetlversion</entry> <entry>n/a</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetmaxprocs</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetnull</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetopt</entry> <entry>(same)</entry> <entry>partial</entry></row>
+<row><entry>core     </entry> <entry>dbsettime</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsetuserdata</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>n/a</entry> <entry>dbspid</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsqlexec</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsqlok</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbsqlsend</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>n/a</entry> <entry>dbstrbuild</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbstrcpy</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbstrlen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>n/a</entry> <entry>DBTDS</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbuse</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbvarylen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>n/a</entry> <entry>dbversion</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbwillconvert</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>core     </entry> <entry>dbwinexit (Windows only)</entry> <entry>n/a</entry> <entry>no-op macro</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursor</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorbind</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorclose</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorcolinfo</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorfetch</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorfetchex</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorinfo</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursorinfoex</entry> <entry>n/a</entry> <entry>never</entry></row>
+<row><entry>cursor   </entry> <entry>dbcursoropen</entry> <entry>(same)</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdate4cmp</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdate4zero</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdatechar</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdatecmp</entry> <entry>OK</entry> <entry></entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdatename</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdateorder</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdatepart</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdatezero</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbdayname</entry> <entry>never</entry></row>
+<row><entry>datetime </entry> <entry>n/a</entry> <entry>dbmonthname</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbhasretstat</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbnumrets</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbretdata</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbretlen</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbretname</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbretstatus</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbrettype</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbrpcexec</entry> <entry>n/a</entry> <entry></entry></row>
+<row><entry>procedure</entry> <entry>dbrpcinit</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbrpcparam</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>procedure</entry> <entry>dbrpcsend</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>text     </entry> <entry>dbmoretext</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>text     </entry> <entry>dbreadtext</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>text     </entry> <entry>dbtxptr</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>text     </entry> <entry>dbtxtimestamp</entry> <entry>(same)</entry> <entry>OK</entry></row>
+<row><entry>text     </entry> <entry>dbtxtsnewval</entry> <entry>(same)</entry> <entry></entry></row>
+<row><entry>text     </entry> <entry>dbtxtsput</entry> <entry>(same)</entry> <entry></entry></row>
+<row><entry>text     </entry> <entry>dbupdatetext</entry> <entry>n/a</entry> <entry></entry></row>
+<row><entry>text     </entry> <entry>dbwritetext</entry> <entry>(same)</entry> <entry>OK</entry></row>
+ </tbody></tgroup></table>
