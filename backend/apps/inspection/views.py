@@ -204,6 +204,63 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
                 'result_message': str(e)
             }
 
+    @action(detail=True, methods=['post'])
+    def execute_db_inspection(self, request, pk=None):
+        """执行数据库巡检（支持自定义SQL）"""
+        task = self.get_object()
+        custom_sql = request.data.get('custom_sql', None)
+
+        # 更新状态
+        task.status = 'in_progress'
+        task.executed_time = timezone.now()
+        task.save()
+
+        try:
+            from apps.inspection.db_inspector_v2 import run_inspection
+            record = run_inspection(task.id, custom_sql=custom_sql)
+
+            return Response({
+                'success': True,
+                'message': record.summary,
+                'record_id': record.id,
+                'total_checks': record.total_checks,
+                'pass_checks': record.pass_checks,
+                'warning_checks': record.warning_checks,
+                'fail_checks': record.fail_checks,
+                'overall_status': record.overall_status,
+            })
+        except Exception as e:
+            task.status = 'failed'
+            task.save()
+            return Response({
+                'success': False,
+                'message': f'巡检执行失败: {str(e)}'
+            }, status=500)
+
+    @action(detail=False, methods=['post'])
+    def execute_custom_sql(self, request):
+        """执行自定义SQL查询"""
+        asset_id = request.data.get('asset_id')
+        sql = request.data.get('sql')
+
+        if not asset_id or not sql:
+            return Response({'error': 'asset_id 和 sql 为必填项'}, status=400)
+
+        try:
+            from apps.assets.models import Asset
+            from apps.inspection.db_connectors import get_connector_from_asset
+
+            asset = Asset.objects.get(id=asset_id)
+            connector = get_connector_from_asset(asset)
+            result = connector.execute_custom_sql(sql)
+
+            return Response(result)
+        except Asset.DoesNotExist:
+            return Response({'error': '资产不存在'}, status=404)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+            }
+
 
 class InspectionRecordViewSet(viewsets.ReadOnlyModelViewSet):
     """巡检记录视图集（只读）"""
