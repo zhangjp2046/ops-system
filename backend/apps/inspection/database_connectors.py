@@ -396,37 +396,134 @@ class MySQLConnector(DatabaseConnector):
 
 
 class MSSQLConnector(DatabaseConnector):
-    """MSSQL数据库连接器"""
+    """MSSQL数据库连接器（基于FreeTDS tsql）
+    
+    使用 FreeTDS tsql 命令行工具连接 MSSQL，
+    解决了 pymssql 2.3.x 和 ODBC Driver 18 的 TLS 兼容性问题。
+    
+    前置条件：
+    - 安装 freetds-bin: sudo apt-get install -y tdsodbc freetds-bin
+    - 配置 /tmp/freetds.conf 关闭加密:
+        [global]
+            tds version = 7.4
+            encryption = off
+            client charset = UTF-8
+    """
+    
+    def __init__(self, asset):
+        super().__init__(asset)
+        self._setup_freetds()
+        self._connected = False
+    
+    def _setup_freetds(self):
+        """配置 FreeTDS 环境"""
+        import subprocess
+        conf_path = '/tmp/freetds.conf'
+        if not os.path.exists(conf_path):
+            with open(conf_path, 'w') as f:
+                f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
+        os.environ['FREETDSCONF'] = conf_path
     
     def _get_default_port(self):
         return '1433'
     
+    def _tsql_query(self, sql):
+        """使用 FreeTDS tsql 执行查询"""
+        import subprocess
+        import re
+        
+        os.environ['FREETDSCONF'] = '/tmp/freetds.conf'
+        cmd = f'TDSVER=7.4 tsql -H {self.config["host"]} -p {self.config["port"]} ' \
+              f'-U {self.config["username"]} -P "{self.config["password"]}" ' \
+              f'-D {self.config["database"]}'
+        
+        proc = subprocess.Popen(
+            cmd, shell=True, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, 'FREETDSCONF': '/tmp/freetds.conf'}
+        )
+        stdout, stderr = proc.communicate(input=f'{sql}\nGO\n')
+        
+        results = []
+        lines = stdout.split('\n')
+        
+        # 去掉提示符前缀，过滤无关行
+        clean_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith('locale') or stripped.startswith('using') or stripped.startswith('Setting'):
+                continue
+            if re.match(r'^\(\d+ rows? affected\)', stripped):
+                continue
+            if re.match(r'^\d+>\s*$', stripped):
+                continue
+            # 去掉 1> 2> 前缀
+            stripped = re.sub(r'^\d+>\s*', '', stripped)
+            stripped = re.sub(r'^\d+>\s*', '', stripped)
+            if not stripped:
+                continue
+            clean_lines.append(stripped)
+        
+        if len(clean_lines) < 2:
+            return results
+        
+        # 第一行是表头（含 \t）
+        header_line = clean_lines[0]
+        if '\t' not in header_line:
+            return results
+        
+        headers = header_line.split('\t')
+        num_cols = len(headers)
+        
+        # 合并数据行：处理含换行符的字段（如 @@VERSION）
+        merged_rows = []
+        current_values = []
+        
+        for line in clean_lines[1:]:
+            parts = line.split('\t')
+            
+            if line.startswith('\t') and current_values:
+                # 缩进行 = 上一列值的续行
+                current_values[-1] += '\n' + (parts[0] if parts[0] else '')
+                current_values.extend([p for p in parts[1:] if p])
+            else:
+                # 新行开始
+                if len(current_values) >= num_cols:
+                    merged_rows.append(current_values[:num_cols])
+                current_values = parts
+        
+        if len(current_values) >= num_cols:
+            merged_rows.append(current_values[:num_cols])
+        
+        for row in merged_rows:
+            results.append(dict(zip(headers, row)))
+        
+        return results
+    
     def connect(self):
+        """测试连接"""
         try:
-            import pymssql
-            self.connection = pymssql.connect(
-                server=self.config['host'],
-                port=self.config['port'],
-                database=self.config['database'],
-                user=self.config['username'],
-                password=self.config['password'],
-                login_timeout=10
-            )
+            result = self._tsql_query('SELECT 1 AS test')
+            self._connected = True
+            self.connection = True  # 标记连接成功
             return self.connection
-        except ImportError:
-            self.connection = None
-            return None
         except Exception as e:
+            self._connected = False
+            self.connection = None
             raise Exception(f'MSSQL连接失败: {str(e)}')
     
     def execute_query(self, sql):
-        if self.connection is None:
-            return self._mock_query_result(sql)
+        """执行SQL查询"""
+        if not self._connected:
+            try:
+                self.connect()
+            except:
+                return self._mock_query_result(sql)
         
         try:
-            with self.connection.cursor(as_dict=True) as cursor:
-                cursor.execute(sql)
-                return cursor.fetchall()
+            return self._tsql_query(sql)
         except Exception as e:
             raise Exception(f'查询失败: {str(e)}')
     
