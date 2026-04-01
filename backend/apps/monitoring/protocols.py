@@ -482,101 +482,105 @@ class DatabaseProtocol(BaseProtocol):
         return result
     
     def _test_mssql(self) -> Dict[str, Any]:
+        """测试MSSQL连接 - 使用FreeTDS tsql（解决TLS兼容问题）"""
         result = {
             'success': False,
             'connected': False,
             'version': None,
             'error': None
         }
-        
+
         try:
-            import pyodbc
-            
-            # 获取可用的 ODBC 驱动
-            drivers = pyodbc.drivers()
-            
-            # 优先尝试的驱动列表
-            preferred_drivers = [
-                '{ODBC Driver 17 for SQL Server}',
-                '{ODBC Driver 13 for SQL Server}',
-                '{SQL Server Native Client 11.0}',
-                '{SQL Server}',
-            ]
-            
-            # 加入系统可用的 SQL Server 相关驱动
-            for d in drivers:
-                if 'SQL' in d or 'ODBC' in d:
-                    if d not in preferred_drivers:
-                        preferred_drivers.append(d)
-            
-            last_error = ''
-            
-            for driver in preferred_drivers:
-                try:
-                    # 构建连接字符串
-                    conn_str = (
-                        f"DRIVER={driver};"
-                        f"SERVER={self.host},{self.port or 1433};"
-                        f"UID={self.username};"
-                        f"PWD={self.password};"
-                        f"Connection Timeout={self.timeout};"
-                    )
-                    
-                    if self.database:
-                        conn_str += f"DATABASE={self.database};"
-                    
-                    conn = pyodbc.connect(conn_str)
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT @@VERSION')
-                    version = cursor.fetchone()
-                    result['version'] = version[0][:80] if version else None
-                    result['connected'] = True
-                    result['success'] = True
-                    result['data'] = {'driver': driver}
-                    cursor.close()
-                    conn.close()
-                    break
-                    
-                except Exception as e:
-                    last_error = str(e)
-                    continue
-            
-            if not result['success']:
-                result['error'] = f"ODBC连接失败: {last_error}"
-                result['data'] = {'available_drivers': drivers}
-                    
-        except ImportError:
-            result['error'] = 'pyodbc未安装: pip install pyodbc'
+            # 配置 FreeTDS 环境
+            import os
+            conf_path = '/tmp/freetds.conf'
+            if not os.path.exists(conf_path):
+                with open(conf_path, 'w') as f:
+                    f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
+
+            # 使用 tsql 执行查询
+            cmd = (f'TDSVER=7.4 tsql -H {self.host} -p {self.port or 1433} '
+                   f'-U {self.username} -P "{self.password}" '
+                   f'-D {self.database or "master"}')
+
+            proc = subprocess.Popen(
+                cmd, shell=True, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env={**os.environ, 'FREETDSCONF': conf_path}
+            )
+            stdout, stderr = proc.communicate(input='SELECT @@VERSION AS v\nGO\n', timeout=self.timeout + 5)
+
+            # 解析版本信息
+            if 'Microsoft SQL Server' in stdout:
+                for line in stdout.split('\n'):
+                    if 'Microsoft SQL Server' in line:
+                        version = line.strip()
+                        # 去掉 tsql 前缀
+                        version = re.sub(r'(?:\d+>\s*)+', '', version)
+                        result['version'] = version[:100]
+                        break
+                result['connected'] = True
+                result['success'] = True
+            elif 'Msg 18456' in stdout or 'Login failed' in stdout:
+                result['error'] = '登录失败，请检查用户名密码'
+            elif 'Adaptive Server connection failed' in stdout or 'connection failed' in stdout:
+                result['error'] = '连接失败，请检查地址和端口'
+            else:
+                result['error'] = f'MSSQL连接异常: {stderr[:200] if stderr else stdout[:200]}'
+
+        except subprocess.TimeoutExpired:
+            result['error'] = 'MSSQL连接超时'
+        except FileNotFoundError:
+            result['error'] = 'tsql未安装，请执行: sudo apt-get install -y tdsodbc freetds-bin'
         except Exception as e:
-            result['error'] = f'错误: {str(e)}'
-        
+            result['error'] = f'MSSQL连接错误: {str(e)}'
+
         return result
     
     def _test_oracle(self) -> Dict[str, Any]:
+        """测试Oracle连接 - 使用sqlplus命令行"""
         result = {
             'success': False,
             'connected': False,
             'version': None,
             'error': None
         }
-        
+
         try:
-            import cx_Oracle
-            dsn = cx_Oracle.makedsn(self.host, self.port or 1521, service_name=self.database)
-            conn = cx_Oracle.connect(self.username, self.password, dsn)
-            
-            version = conn.version
-            result['version'] = version
-            result['connected'] = True
-            result['success'] = True
-            
-            conn.close()
-            
-        except ImportError:
-            result['error'] = 'cx_Oracle未安装: pip install cx_Oracle'
+            dsn = f'{self.username}/{self.password}@{self.host}:{self.port or 1521}/{self.database or "ORCL"}'
+            sql = "SELECT banner FROM v$version WHERE ROWNUM = 1;\nEXIT;"
+            proc = subprocess.Popen(
+                f'sqlplus -S {dsn}',
+                shell=True, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            stdout, stderr = proc.communicate(input=sql, timeout=self.timeout + 5)
+
+            if 'Oracle Database' in stdout:
+                for line in stdout.split('\n'):
+                    line = line.strip()
+                    if 'Oracle Database' in line:
+                        result['version'] = line[:100]
+                        break
+                result['connected'] = True
+                result['success'] = True
+            elif 'ORA-01017' in stdout:
+                result['error'] = '登录失败，请检查用户名密码'
+            elif 'ORA-12541' in stdout:
+                result['error'] = '连接失败，请检查监听器是否启动'
+            elif 'ORA-' in stdout:
+                match = re.search(r'(ORA-\d+:.*)', stdout)
+                result['error'] = match.group(1) if match else f'Oracle错误: {stdout[:200]}'
+            else:
+                result['error'] = f'Oracle连接异常: {stdout[:200]}'
+
+        except subprocess.TimeoutExpired:
+            result['error'] = 'Oracle连接超时'
+        except FileNotFoundError:
+            result['error'] = 'sqlplus未安装，请安装Oracle客户端'
         except Exception as e:
-            result['error'] = f'错误: {str(e)}'
-        
+            result['error'] = f'Oracle连接错误: {str(e)}'
+
         return result
     
     def collect(self) -> Dict[str, Any]:
