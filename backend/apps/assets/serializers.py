@@ -61,6 +61,7 @@ class AssetSerializer(serializers.ModelSerializer):
             'asset_code', 'asset_name', 'description',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
+            'protocol', 'db_type', 'port', 'username', 'password', 'database',
             'purchase_date', 'warranty_end', 'decommission_date',
             'owner', 'department', 'vendor',
             'field_data', 'online', 'last_check_time',
@@ -95,6 +96,7 @@ class AssetCreateSerializer(serializers.ModelSerializer):
             'customer', 'asset_type', 'asset_code', 'asset_name', 'description',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
+            'protocol', 'db_type', 'port', 'username', 'password', 'database',
             'purchase_date', 'warranty_end', 'decommission_date',
             'owner', 'department', 'vendor',
             'field_values'
@@ -166,6 +168,7 @@ class AssetUpdateSerializer(serializers.ModelSerializer):
             'asset_name', 'description',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
+            'protocol', 'db_type', 'port', 'username', 'password', 'database',
             'purchase_date', 'warranty_end', 'decommission_date',
             'owner', 'department', 'vendor',
             'field_values'

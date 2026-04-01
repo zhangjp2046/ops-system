@@ -79,6 +79,44 @@
           <el-input v-model="form.location" placeholder="请输入位置" />
         </el-form-item>
         
+        <el-form-item label="采集协议">
+          <el-select v-model="form.protocol" placeholder="请选择协议" style="width: 100%">
+            <el-option label="SNMP" value="snmp" />
+            <el-option label="SSH" value="ssh" />
+            <el-option label="Ping" value="ping" />
+            <el-option label="MySQL" value="mysql" />
+            <el-option label="MSSQL" value="mssql" />
+            <el-option label="Oracle" value="oracle" />
+            <el-option label="PostgreSQL" value="postgresql" />
+            <el-option label="端口检测" value="port" />
+          </el-select>
+        </el-form-item>
+        
+        <el-form-item label="数据库类型" v-if="form.protocol === 'mssql' || form.protocol === 'oracle' || form.protocol === 'mysql' || form.protocol === 'postgresql'">
+          <el-select v-model="form.db_type" placeholder="请选择数据库类型" style="width: 100%">
+            <el-option label="MySQL" value="mysql" v-if="form.protocol === 'mysql'" />
+            <el-option label="MSSQL" value="mssql" v-if="form.protocol === 'mssql'" />
+            <el-option label="Oracle" value="oracle" v-if="form.protocol === 'oracle'" />
+            <el-option label="PostgreSQL" value="postgresql" v-if="form.protocol === 'postgresql'" />
+          </el-select>
+        </el-form-item>
+        
+        <el-form-item label="端口">
+          <el-input v-model="form.port" placeholder="请输入端口" />
+        </el-form-item>
+        
+        <el-form-item label="用户名" v-if="form.protocol && form.protocol !== 'ping' && form.protocol !== 'snmp'">
+          <el-input v-model="form.username" placeholder="请输入用户名" />
+        </el-form-item>
+        
+        <el-form-item label="密码" v-if="form.protocol && form.protocol !== 'ping' && form.protocol !== 'snmp'">
+          <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
+        </el-form-item>
+        
+        <el-form-item label="数据库名" v-if="form.protocol === 'mssql' || form.protocol === 'oracle' || form.protocol === 'mysql' || form.protocol === 'postgresql'">
+          <el-input v-model="form.database" placeholder="请输入数据库名" />
+        </el-form-item>
+        
         <el-form-item label="机房">
           <el-input v-model="form.room" placeholder="请输入机房" />
         </el-form-item>
@@ -244,6 +282,12 @@ const form = reactive({
   purchase_date: null,
   warranty_end: null,
   description: '',
+  protocol: '',
+  db_type: '',
+  port: '',
+  username: '',
+  password: '',
+  database: '',
   field_values: {}
 })
 
@@ -312,6 +356,12 @@ async function loadAsset() {
     form.purchase_date = res.purchase_date
     form.warranty_end = res.warranty_end
     form.description = res.description
+    form.protocol = res.protocol || ''
+    form.db_type = res.db_type || ''
+    form.port = res.port || ''
+    form.username = res.username || ''
+    form.password = res.password || ''
+    form.database = res.database || ''
     
     // 加载字段数据
     if (res.field_data) {
@@ -375,6 +425,12 @@ async function handleSubmit() {
       purchase_date: form.purchase_date,
       warranty_end: form.warranty_end,
       description: form.description,
+      protocol: form.protocol,
+      db_type: form.db_type,
+      port: form.port,
+      username: form.username,
+      password: form.password,
+      database: form.database,
       field_values: form.field_values
     }
     

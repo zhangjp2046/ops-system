@@ -144,6 +144,24 @@ class Asset(models.Model):
     
     # IP地址（用于监控）
     ip_address = models.GenericIPAddressField('IP地址', null=True, blank=True)
+
+    # 协议和连接信息
+    PROTOCOL_CHOICES = [
+        ('snmp', 'SNMP'),
+        ('ssh', 'SSH'),
+        ('ping', 'Ping'),
+        ('mysql', 'MySQL'),
+        ('mssql', 'MSSQL'),
+        ('oracle', 'Oracle'),
+        ('postgresql', 'PostgreSQL'),
+        ('port', '端口检测'),
+    ]
+    protocol = models.CharField('采集协议', max_length=20, choices=PROTOCOL_CHOICES, blank=True, default='')
+    db_type = models.CharField('数据库类型', max_length=20, blank=True, default='')
+    port = models.CharField('端口', max_length=10, blank=True, default='')
+    username = models.CharField('用户名', max_length=100, blank=True, default='')
+    password = models.CharField('密码', max_length=200, blank=True, default='')
+    database = models.CharField('数据库名', max_length=100, blank=True, default='')
     
     # 时间信息
     purchase_date = models.DateField('购买日期', null=True, blank=True)
