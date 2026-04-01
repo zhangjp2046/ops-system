@@ -336,39 +336,174 @@ class SNMPProtocol(BaseProtocol):
             result['error'] = f'错误: {str(e)}'
         
         return result
-    
-    def collect(self) -> Dict[str, Any]:
-        """采集SNMP数据"""
-        result = self.test_connect()
-        
-        if not result['success']:
-            return result
-        
-        data = {
-            'success': True,
-            'metrics': {}
-        }
-        
-        # 常用OID
-        oids = {
-            'sysDescr': '1.3.6.1.2.1.1.1.0',
-            'sysUptime': '1.3.6.1.2.1.1.3.0',
-            'sysContact': '1.3.6.1.2.1.1.4.0',
-            'sysName': '1.3.6.1.2.1.1.5.0',
-            'ifNumber': '1.3.6.1.2.1.2.1.0',
-            'cpuLoad': '1.3.6.1.4.1.2021.10.1.3.1',  # UCD-SNMP load
-            'memTotal': '1.3.6.1.4.1.2021.4.5.0',    # UCD-SNMP mem
-            'memAvail': '1.3.6.1.4.1.2021.4.6.0',
-        }
-        
+
+    def _snmp_get(self, oid: str) -> Optional[str]:
+        """单个 OID 查询"""
         try:
-            for name, oid in oids.items():
-                cmd = ['snmpget', '-v', '2c', '-c', self.community, '-Ovq', self.host, oid]
-                output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=self.timeout)
-                data['metrics'][name] = output.decode('utf-8', errors='ignore').strip()
+            cmd = ['snmpget', '-v', '2c', '-c', self.community, '-Ovq', '-t', str(self.timeout), self.host, oid]
+            output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=self.timeout + 5)
+            val = output.decode('utf-8', errors='ignore').strip(); return val.strip('"').strip("'")
+        except:
+            return None
+
+    def _snmp_walk(self, oid: str) -> Dict[str, str]:
+        """批量 OID 查询，返回 {oid: value}"""
+        result = {}
+        try:
+            cmd = ['snmpwalk', '-v', '2c', '-c', self.community, '-Oqv', '-t', str(self.timeout), self.host, oid]
+            output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=self.timeout + 10)
+            values = output.decode('utf-8', errors='ignore').strip().split('\n')
+
+            cmd2 = ['snmpwalk', '-v', '2c', '-c', self.community, '-On', '-t', str(self.timeout), self.host, oid]
+            output2 = subprocess.check_output(cmd2, stderr=subprocess.DEVNULL, timeout=self.timeout + 10)
+            oids = [line.strip() for line in output2.decode('utf-8', errors='ignore').strip().split('\n') if line.strip()]
+
+            for i, val in enumerate(values):
+                if i < len(oids):
+                    full_oid = oids[i].split('=')[0].strip() if '=' in oids[i] else oids[i]
+                    result[full_oid] = val.strip().strip('"')
         except:
             pass
-        
+        return result
+
+    def collect(self) -> Dict[str, Any]:
+        """采集详细SNMP设备信息"""
+        result = self.test_connect()
+
+        if not result['success']:
+            return result
+
+        data = {
+            'success': True,
+            'device_info': {},
+            'system': {},
+            'cpu': [],
+            'memory': {},
+            'disk': [],
+            'network': [],
+            'metrics': {}
+        }
+
+        try:
+            # ========== 基本系统信息 ==========
+            sys_oids = {
+                'sysDescr': '1.3.6.1.2.1.1.1.0',       # 系统描述
+                'sysObjectID': '1.3.6.1.2.1.1.2.0',    # 设备类型OID
+                'sysUpTime': '1.3.6.1.2.1.1.3.0',      # 运行时间
+                'sysContact': '1.3.6.1.2.1.1.4.0',     # 联系人
+                'sysName': '1.3.6.1.2.1.1.5.0',        # 主机名
+                'sysLocation': '1.3.6.1.2.1.1.6.0',    # 位置
+                'sysServices': '1.3.6.1.2.1.1.7.0',    # 服务层
+            }
+            for name, oid in sys_oids.items():
+                val = self._snmp_get(oid)
+                if val is not None:
+                    data['system'][name] = val
+
+            # 解析运行时间
+            uptime_str = data['system'].get('sysUpTime', '')
+            if 'days' in uptime_str:
+                data['system']['uptime_display'] = uptime_str.split(')')[1].strip() if ')' in uptime_str else uptime_str
+            else:
+                data['system']['uptime_display'] = uptime_str
+
+            # ========== CPU 信息 (HOST-RESOURCES-MIB) ==========
+            cpu_oids = self._snmp_walk('1.3.6.1.2.1.25.3.3.1.2')  # hrProcessorLoad
+            for oid, val in cpu_oids.items():
+                idx = oid.split('.')[-1]
+                data['cpu'].append({
+                    'index': int(idx),
+                    'load': int(val),
+                    'name': f'CPU {idx}'
+                })
+
+            # ========== 内存和磁盘 (HOST-RESOURCES-MIB) ==========
+            import time as _time
+            storage_desc = self._snmp_walk('1.3.6.1.2.1.25.2.3.1.3')
+            storage_size = self._snmp_walk('1.3.6.1.2.1.25.2.3.1.5')
+            storage_used = self._snmp_walk('1.3.6.1.2.1.25.2.3.1.6')
+            storage_units = self._snmp_walk('1.3.6.1.2.1.25.2.3.1.4')
+
+            # 如果 walk 返回的 key 不是 . 开头，修复格式
+            def fix_key(oid_dict):
+                return {k if k.startswith('.') else '.' + k: v for k, v in oid_dict.items()}
+
+            storage_desc = fix_key(storage_desc)
+            storage_size = fix_key(storage_size)
+            storage_used = fix_key(storage_used)
+            storage_units = fix_key(storage_units)
+
+            for oid, desc in storage_desc.items():
+                idx = oid.split('.')[-1]
+                size = int(storage_size.get(f'.1.3.6.1.2.1.25.2.3.1.5.{idx}', 0))
+                used = int(storage_used.get(f'.1.3.6.1.2.1.25.2.3.1.6.{idx}', 0))
+                units = int(storage_units.get(f'.1.3.6.1.2.1.25.2.3.1.4.{idx}', 4096))
+
+                size_mb = round(size * units / 1024 / 1024, 2)
+                used_mb = round(used * units / 1024 / 1024, 2)
+                free_mb = round(size_mb - used_mb, 2)
+                pct = round(used / size * 100, 1) if size > 0 else 0
+
+                item = {
+                    'index': int(idx),
+                    'name': desc,
+                    'size_mb': size_mb,
+                    'used_mb': used_mb,
+                    'free_mb': free_mb,
+                    'used_pct': pct,
+                }
+
+                if 'Memory' in desc:
+                    data['memory'][desc] = item
+                elif '\\' in desc or '/' in desc:
+                    data['disk'].append(item)
+
+            # ========== 网络接口 ==========
+            try:
+                if_descr = self._snmp_walk('1.3.6.1.2.1.2.2.1.2')       # ifDescr
+                if_status = self._snmp_walk('1.3.6.1.2.1.2.2.1.8')       # ifOperStatus
+                if_speed = self._snmp_walk('1.3.6.1.2.1.2.2.1.5')        # ifSpeed
+
+                status_map = {1: 'up', 2: 'down', 3: 'testing', 4: 'unknown', 5: 'dormant'}
+
+                for oid, name in if_descr.items():
+                    idx = oid.split('.')[-1]
+                    try:
+                        idx_int = int(idx)
+                    except ValueError:
+                        continue  # 跳过无法解析的 OID
+
+                    status_val = int(if_status.get(f'.1.3.6.1.2.1.2.2.1.8.{idx}', 4))
+                    speed = int(if_speed.get(f'.1.3.6.1.2.1.2.2.1.5.{idx}', 0))
+
+                    data['network'].append({
+                        'index': idx_int,
+                        'name': name,
+                        'status': status_map.get(status_val, 'unknown'),
+                        'speed_bps': speed,
+                        'speed_display': f'{speed // 1000000}Mbps' if speed >= 1000000 else f'{speed // 1000}Kbps',
+                    })
+            except Exception:
+                pass  # 网络接口采集失败不影响整体
+
+            # ========== 汇总 ==========
+            data['device_info'] = {
+                'hostname': data['system'].get('sysName', ''),
+                'os': data['system'].get('sysDescr', '')[:100],
+                'uptime': data['system'].get('uptime_display', ''),
+                'cpu_count': len(data['cpu']),
+                'cpu_avg_load': round(sum(c['load'] for c in data['cpu']) / max(len(data['cpu']), 1), 1),
+                'disk_count': len(data['disk']),
+                'disk_total_mb': round(sum(d['size_mb'] for d in data['disk']), 2),
+                'disk_used_mb': round(sum(d['used_mb'] for d in data['disk']), 2),
+                'network_count': len(data['network']),
+                'network_up': sum(1 for n in data['network'] if n['status'] == 'up'),
+            }
+
+        except Exception as e:
+            import traceback
+            data['error'] = f'{str(e)}\n{traceback.format_exc()[:500]}'
+
         result['data'] = data
         return result
 

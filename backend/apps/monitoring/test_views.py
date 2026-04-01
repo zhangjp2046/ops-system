@@ -20,235 +20,91 @@ from .serializers import MonitorTestConfigSerializer, MonitorTestResultSerialize
 
 
 class MSSQLHandler:
-    """MSSQL连接处理器"""
-    def __init__(self, host, port=1433, username='', password='', database='', 
+    """MSSQL连接处理器 - 使用FreeTDS tsql（解决TLS兼容问题）"""
+    def __init__(self, host, port=1433, username='', password='', database='',
                  timeout=10, encrypt=False, trust_server_certificate=False):
         self.host = host
         self.port = port
         self.username = username
         self.password = password
-        self.database = database
+        self.database = database or 'master'
         self.timeout = timeout
-        self.encrypt = encrypt
-        self.trust_server_certificate = trust_server_certificate
 
     def test_connect(self):
-        """
-        尝试多种方法连接MSSQL，优先使用 tsql（与巡检任务一致）
-        """
-        import time
-        
-        start_time = time.time()
-        
-        # 方法1: tsql（与巡检任务一致的方案）
-        result = self._try_tsql_connect()
-        if result['success']:
-            result['response_time'] = (time.time() - start_time) * 1000
-            return result
-        
-        # 方法2: pyodbc
-        result = self._try_pyodbc_connect()
-        if result['success']:
-            result['response_time'] = (time.time() - start_time) * 1000
-            return result
-        
-        # 方法3: pymssql
-        result = self._try_pymssql_connect()
-        if result['success']:
-            result['response_time'] = (time.time() - start_time) * 1000
-            return result
-        
-        # 如果都失败了，返回最后的错误
-        result['response_time'] = (time.time() - start_time) * 1000
-        return result
-
-    def _try_pyodbc_connect(self):
-        """
-        使用 pyodbc 连接 MSSQL（备用方案）
-        """
-        try:
-            import pyodbc
-
-            all_drivers = list(pyodbc.drivers())
-            available_drivers = [x for x in all_drivers if 'SQL' in x or 'ODBC' in x]
-
-            if not available_drivers:
-                return {
-                    'success': False,
-                    'error': '未找到可用的SQL Server ODBC驱动',
-                    'data': {'available_drivers': all_drivers}
-                }
-
-            driver = available_drivers[0]
-
-            # 尝试多种连接字符串组合
-            conn_str_options = [
-                f"DRIVER={{{driver}}};SERVER={self.host},{self.port};DATABASE={self.database or 'master'};UID={self.username};PWD={self.password};Connect Timeout={self.timeout};Encrypt=yes;TrustServerCertificate=yes;",
-                f"DRIVER={{{driver}}};SERVER={self.host},{self.port};DATABASE={self.database or 'master'};UID={self.username};PWD={self.password};Connect Timeout={self.timeout};Encrypt=no;",
-            ]
-
-            last_error = ''
-            for conn_str in conn_str_options:
-                try:
-                    conn = pyodbc.connect(conn_str, timeout=self.timeout)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT 1")
-                    cursor.fetchone()
-                    cursor.close()
-                    conn.close()
-                    return {
-                        'success': True,
-                        'message': 'pyodbc连接成功',
-                        'data': {'driver_used': driver}
-                    }
-                except Exception as e:
-                    last_error = str(e)
-                    continue
-
-            return {
-                'success': False,
-                'error': f'pyodbc连接失败: {last_error}',
-                'data': {'available_drivers': all_drivers}
-            }
-        except ImportError:
-            return {
-                'success': False,
-                'error': 'pyodbc未安装',
-                'data': {}
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'pyodbc错误: {str(e)}',
-                'data': {}
-            }
-
-    def _try_pymssql_connect(self):
-        """
-        使用 pymssql 连接 MSSQL（备用方案）
-        """
-        try:
-            import pymssql
-
-            conn_options = [
-                dict(server=self.host, port=int(self.port),
-                     user=self.username, password=self.password,
-                     database=self.database or 'master',
-                     timeout=self.timeout, login_timeout=self.timeout,
-                     tds_version='7.4'),
-                dict(server=self.host, port=int(self.port),
-                     user=self.username, password=self.password,
-                     database=self.database or 'master',
-                     timeout=self.timeout, login_timeout=self.timeout),
-            ]
-
-            last_error = ''
-            for kwargs in conn_options:
-                try:
-                    conn = pymssql.connect(**kwargs)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT 1")
-                    cursor.fetchone()
-                    cursor.close()
-                    conn.close()
-                    return {
-                        'success': True,
-                        'message': 'pymssql连接成功',
-                        'data': {'library_used': 'pymssql'}
-                    }
-                except Exception as e:
-                    last_error = str(e)
-                    continue
-
-            return {
-                'success': False,
-                'error': f'pymssql连接失败: {last_error}'
-            }
-        except ImportError:
-            return {
-                'success': False,
-                'error': 'pymssql未安装'
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'pymssql错误: {str(e)}'
-            }
-
-    def _try_tsql_connect(self):
-        """
-        使用 FreeTDS tsql 命令行连接 MSSQL（与巡检任务一致的方案）
-        """
+        """使用 FreeTDS tsql 测试 MSSQL 连接"""
         import subprocess
-        import re
         import os
+        import time
 
-        # 配置 FreeTDS
-        conf_path = '/tmp/freetds.conf'
-        if not os.path.exists(conf_path):
-            with open(conf_path, 'w') as f:
-                f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
-        os.environ['FREETDSCONF'] = conf_path
+        start_time = time.time()
 
         try:
-            cmd = f'TDSVER=7.4 tsql -H {self.host} -p {self.port} ' \
-                  f'-U {self.username} -P "{self.password}" ' \
-                  f'-D {self.database or "master"}'
+            # 配置 FreeTDS
+            conf_path = '/tmp/freetds.conf'
+            if not os.path.exists(conf_path):
+                with open(conf_path, 'w') as f:
+                    f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
+
+            cmd = (f'TDSVER=7.4 tsql -H {self.host} -p {self.port} '
+                   f'-U {self.username} -P "{self.password}" '
+                   f'-D {self.database}')
 
             proc = subprocess.Popen(
                 cmd, shell=True, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 env={**os.environ, 'FREETDSCONF': conf_path}
             )
-            stdout, stderr = proc.communicate(input='SELECT 1 AS test\nGO\n', timeout=self.timeout)
+            stdout, stderr = proc.communicate(input='SELECT @@VERSION AS v\nGO\n', timeout=self.timeout + 5)
 
-            # 检查是否有错误
-            if 'Error' in stderr or 'failed' in stderr.lower():
-                return {
-                    'success': False,
-                    'error': f'tsql连接失败: {stderr[:200]}',
-                    'data': {}
-                }
+            response_time = (time.time() - start_time) * 1000
 
-            # 解析输出
-            if '1' in stdout and ('row affected' in stdout.lower() or 'test' in stdout.lower()):
+            if 'Microsoft SQL Server' in stdout:
+                version = ''
+                for line in stdout.split('\n'):
+                    if 'Microsoft SQL Server' in line:
+                        import re
+                        version = re.sub(r'(?:\d+>\s*)+', '', line.strip())
+                        break
                 return {
                     'success': True,
-                    'message': 'tsql连接成功',
-                    'data': {'method': 'tsql', 'version': 'tds 7.4'}
+                    'message': 'FreeTDS tsql 连接成功',
+                    'response_time': round(response_time, 2),
+                    'data': {
+                        'version': version[:100],
+                        'driver': 'FreeTDS tsql',
+                        'method': 'tsql'
+                    }
+                }
+            elif 'Msg 18456' in stdout or 'Login failed' in stdout:
+                return {
+                    'success': False,
+                    'error': '登录失败，请检查用户名密码',
+                    'response_time': round(response_time, 2)
                 }
             else:
                 return {
                     'success': False,
-                    'error': f'tsql查询失败: {stdout[:100]}',
-                    'data': {}
+                    'error': f'MSSQL连接失败: {stderr[:200] if stderr else stdout[:200]}',
+                    'response_time': round(response_time, 2)
                 }
+
         except subprocess.TimeoutExpired:
             return {
                 'success': False,
-                'error': 'tsql连接超时',
-                'data': {}
+                'error': 'MSSQL连接超时',
+                'response_time': (time.time() - start_time) * 1000
+            }
+        except FileNotFoundError:
+            return {
+                'success': False,
+                'error': 'tsql未安装，请执行: sudo apt-get install -y tdsodbc freetds-bin',
+                'response_time': (time.time() - start_time) * 1000
             }
         except Exception as e:
             return {
                 'success': False,
-                'error': f'tsql错误: {str(e)}',
-                'data': {}
-            }
-
-            return {
-                'success': False,
-                'error': f'pymssql连接失败: {last_error}'
-            }
-        except ImportError:
-            return {
-                'success': False,
-                'error': 'pymssql未安装'
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'pymssql错误: {str(e)}'
+                'error': f'MSSQL连接错误: {str(e)}',
+                'response_time': (time.time() - start_time) * 1000
             }
 
 
@@ -296,7 +152,6 @@ class MonitorTestConfigViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         
-        #        customer_id
         customer_id = self.request.query_params.get('customer')
         if customer_id:
             queryset = queryset.filter(customer_id=customer_id)
