@@ -176,7 +176,13 @@
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item label="数据库版本">
-                {{ testResult.version || '-' }}
+                {{ (testResult.data?.version || testResult.version) || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="驱动方式">
+                {{ testResult.data?.method || testResult.data?.driver || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="响应时间">
+                {{ testResult.response_time ? testResult.response_time + 'ms' : '-' }}
               </el-descriptions-item>
             </el-descriptions>
           </template>
@@ -198,7 +204,11 @@
         
         <!-- 错误信息 -->
         <div v-if="testResult.error" class="error-section">
-          <el-alert type="error" :title="testResult.error" show-icon :closable="false" />
+          <el-alert type="error" :title="'测试失败'" show-icon :closable="false">
+            <template #default>
+              <pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px">{{ formatError(testResult.error) }}</pre>
+            </template>
+          </el-alert>
         </div>
         
         <!-- 原始返回数据 (可折叠) -->
@@ -426,12 +436,21 @@ function getProtocolTagType(protocol) {
     'port': 'info',
     'ssh': 'warning',
     'snmp': 'success',
-    'mysql': 'danger',
+    'mysql': '',
     'postgresql': 'warning',
-    'mssql': 'info',
+    'mssql': '',
     'oracle': 'danger'
   }
   return types[protocol] || 'info'
+}
+
+function formatError(err) {
+  if (!err) return ''
+  // 把原始错误信息中的控制字符和新行处理成易读的格式
+  return String(err)
+    .replace(/\\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 function loadProtocols() {
