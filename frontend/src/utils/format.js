@@ -90,5 +90,6 @@ export function getOnlineType(online) {
 }
 
 export function getOnlineText(online) {
+  // 支持 0/1 数字和 true/false 布尔
   return online ? '在线' : '离线'
 }

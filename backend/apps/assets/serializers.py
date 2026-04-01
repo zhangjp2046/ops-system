@@ -63,11 +63,13 @@ class AssetSerializer(serializers.ModelSerializer):
             'status', 'importance_level',
             'purchase_date', 'warranty_end', 'decommission_date',
             'owner', 'department', 'vendor',
-            'field_data', 'created_at', 'updated_at',
+            'field_data', 'online', 'last_check_time',
+            'created_at', 'updated_at',
             'created_by', 'updated_by'
         ]
         read_only_fields = [
             'id', 'customer_name', 'asset_type_name', 'field_data',
+            'online', 'last_check_time',
             'created_at', 'updated_at', 'created_by', 'updated_by'
         ]
     
