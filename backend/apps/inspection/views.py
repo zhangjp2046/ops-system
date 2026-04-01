@@ -82,47 +82,62 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         ip = ip_data.string_value if ip_data else None
         
         results = []
+        asset_type_code = None
         
-        # 执行基础巡检
+        # 获取资产类型
+        try:
+            if task.asset and task.asset.asset_type:
+                asset_type_code = task.asset.asset_type.type_code
+        except Exception:
+            pass
+        
+        # 执行基础巡检 (Ping + 端口) - 所有资产类型都做
         if ip:
-            # Ping检测
             ping_result = self._check_ping(ip)
             results.append(ping_result)
             
-            # 端口检测
             port_result = self._check_port(ip)
             if port_result:
                 results.append(port_result)
         
-        # 创建巡检结果
-        for r in results:
-            InspectionResult.objects.create(
-                task=task,
-                asset=task.asset,
-                check_item=r['check_item'],
-                check_item_code=r['check_item_code'],
-                status=r['status'],
-                result_value=r['result_value'],
-                result_message=r['result_message'],
-                suggestion=r.get('suggestion', '')
+        # 执行数据库巡检 (仅数据库类型资产)
+        # run_inspection 会创建自己的 InspectionRecord 和 InspectionResult
+        if asset_type_code == 'DATABASE':
+            db_results = self._run_db_inspection(task)
+            results.extend(db_results)
+            # 创建巡检记录
+            pass_count = sum(1 for r in results if r['status'] == 'pass')
+            fail_count = sum(1 for r in results if r['status'] == 'fail')
+            warning_count = sum(1 for r in results if r['status'] == 'warning')
+            overall = 'fail' if fail_count > 0 else ('warning' if warning_count > 0 else 'pass')
+            InspectionRecord.objects.create(
+                task=task, asset=task.asset,
+                total_checks=len(results),
+                pass_checks=pass_count, warning_checks=warning_count, fail_checks=fail_count,
+                status='completed', overall_status=overall,
+                executor=request.user if request.user.is_authenticated else None,
+                started_at=task.executed_time, completed_at=timezone.now()
             )
-        
-        # 创建巡检记录
-        pass_count = sum(1 for r in results if r['status'] == 'pass')
-        fail_count = sum(1 for r in results if r['status'] == 'fail')
-        
-        InspectionRecord.objects.create(
-            task=task,
-            asset=task.asset,
-            total_checks=len(results),
-            pass_checks=pass_count,
-            fail_checks=fail_count,
-            status='completed' if fail_count == 0 else 'partial',
-            overall_status='pass' if fail_count == 0 else 'warning',
-            executor=request.user if request.user.is_authenticated else None,
-            started_at=task.executed_time,
-            completed_at=timezone.now()
-        )
+        else:
+            # 非数据库类型：只创建基础检查结果
+            for r in results:
+                InspectionResult.objects.create(
+                    task=task, asset=task.asset,
+                    check_item=r['check_item'], check_item_code=r['check_item_code'],
+                    status=r['status'], result_value=r.get('result_value', ''),
+                    result_message=r['result_message'], suggestion=r.get('suggestion', '')
+                )
+            pass_count = sum(1 for r in results if r['status'] == 'pass')
+            fail_count = sum(1 for r in results if r['status'] == 'fail')
+            overall = 'pass' if fail_count == 0 else 'fail'
+            InspectionRecord.objects.create(
+                task=task, asset=task.asset,
+                total_checks=len(results),
+                pass_checks=pass_count, warning_checks=0, fail_checks=fail_count,
+                status='completed', overall_status=overall,
+                executor=request.user if request.user.is_authenticated else None,
+                started_at=task.executed_time, completed_at=timezone.now()
+            )
         
         # 更新任务状态
         task.status = 'completed'
@@ -130,9 +145,35 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         
         return Response({
             'success': True,
-            'message': f'巡检完成，发现{len(results)}个检查项',
+            'message': f'巡检完成，发现{len(results)}个检查项（通过{pass_count}，警告{warning_count if asset_type_code == "DATABASE" else 0}，失败{fail_count}）',
             'results': results
         })
+    
+    def _run_db_inspection(self, task):
+        """执行数据库巡检（复用 execute_db_inspection 的逻辑）"""
+        from apps.inspection.db_inspector_v2 import run_inspection
+        try:
+            record = run_inspection(task.id, custom_sql=None)
+            # 从巡检记录中提取结果
+            results = []
+            for ir in record.results.all():
+                status_map = {'pass': 'pass', 'warning': 'warning', 'fail': 'fail', 'error': 'fail', 'skip': 'skip'}
+                results.append({
+                    'check_item': ir.check_item,
+                    'check_item_code': ir.check_item_code,
+                    'status': status_map.get(ir.status, 'fail'),
+                    'result_value': ir.result_value or '',
+                    'result_message': ir.result_message or ''
+                })
+            return results
+        except Exception as e:
+            return [{
+                'check_item': '数据库巡检',
+                'check_item_code': 'DB_INSPECTION',
+                'status': 'fail',
+                'result_value': '错误',
+                'result_message': f'数据库巡检执行失败: {str(e)}'
+            }]
     
     def _check_ping(self, ip):
         """Ping检测"""
