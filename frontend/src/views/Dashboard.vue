@@ -185,24 +185,24 @@
             </div>
           </template>
           <el-table :data="inspectionStats.recent_inspections || []" stripe>
-            <el-table-column prop="name" label="巡检名称" />
-            <el-table-column prop="inspection_type" label="类型" width="100">
+            <el-table-column prop="asset_name" label="资产" />
+            <el-table-column prop="overall_status" label="结果" width="80">
               <template #default="{ row }">
-                <el-tag>{{ row.inspection_type }}</el-tag>
+                <el-tag :type="getInspectionStatusType(row.overall_status)">{{ row.overall_status_display || row.overall_status }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="结果" width="120">
+            <el-table-column label="检查项" width="120">
               <template #default="{ row }">
                 <span class="inspection-result">
-                  <span class="passed">{{ row.passed_items }}</span> /
-                  <span class="warning">{{ row.warning_items }}</span> /
-                  <span class="failed">{{ row.failed_items }}</span>
+                  <span class="passed">{{ row.pass_checks }}</span> /
+                  <span class="warning">{{ row.warning_checks }}</span> /
+                  <span class="failed">{{ row.fail_checks }}</span>
                 </span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="时间" width="160">
+              <template #default="{ row }">
+                {{ formatTime(row.created_at) }}
               </template>
             </el-table-column>
           </el-table>
@@ -489,12 +489,18 @@ function goToTasks() {
 
 // 工具函数
 function getSeverityType(severity) {
-  const types = { 'CRITICAL': 'danger', 'HIGH': 'warning', 'MEDIUM': 'warning', 'LOW': 'info' }
-  return types[severity] || 'info'
+  const s = (severity || '').toUpperCase()
+  const types = { 'CRITICAL': 'danger', 'HIGH': 'danger', 'MEDIUM': 'warning', 'LOW': 'info', 'WARNING': 'warning' }
+  return types[s] || 'info'
 }
 
 function getStatusType(status) {
   const types = { 'COMPLETED': 'success', 'RUNNING': 'primary', 'FAILED': 'danger', 'PENDING': 'info' }
+  return types[status] || 'info'
+}
+
+function getInspectionStatusType(status) {
+  const types = { 'pass': 'success', 'warning': 'warning', 'fail': 'danger', 'error': 'danger' }
   return types[status] || 'info'
 }
 

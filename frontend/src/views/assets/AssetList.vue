@@ -6,6 +6,10 @@
         <el-icon><Plus /></el-icon>
         新建资产
       </el-button>
+      <el-button @click="handleRefresh">
+        <el-icon><Refresh /></el-icon>
+        刷新并检测在线状态
+      </el-button>
     </div>
     
     <!-- 搜索和筛选 -->
@@ -110,10 +114,18 @@
         <el-table-column prop="asset_type_name" label="资产类型" width="120" />
         
         <el-table-column prop="customer_name" label="所属客户" width="150" />
-        
-        <el-table-column prop="status" label="状态" width="100">
+
+        <el-table-column prop="online" label="在线状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
+            <el-tag :type="getOnlineType(row.online)" size="small">
+              {{ getOnlineText(row.online) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="status" label="资产状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
@@ -170,12 +182,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAssetList, deleteAsset, getAssetTypeList } from '@/api/asset'
 import { getCustomerList } from '@/api/customer'
-import { formatDate, getStatusType, getStatusText, getImportanceType, getImportanceText } from '@/utils/format'
+import api from '@/api/index'
+import { formatDate, getStatusType, getStatusText, getImportanceType, getImportanceText, getOnlineType, getOnlineText } from '@/utils/format'
 import { Plus, Search, Refresh, View, Edit, Delete } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -198,10 +211,28 @@ const pagination = reactive({
   total: 0
 })
 
+let refreshInterval = null
+
+async function handleRefresh() {
+  // 先ping检测所有资产，刷新在线状态
+  try {
+    await api.post('/dashboard/health/')
+  } catch (e) {
+    console.error('刷新资产在线状态失败:', e)
+  }
+  await loadAssets()
+}
+
 onMounted(() => {
   loadCustomers()
   loadAssetTypes()
-  loadAssets()
+  handleRefresh()
+  // 每60秒自动刷新一次（ping检测在线状态）
+  refreshInterval = setInterval(handleRefresh, 60000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
 })
 
 async function loadCustomers() {

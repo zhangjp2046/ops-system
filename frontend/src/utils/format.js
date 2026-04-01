@@ -83,3 +83,12 @@ export function getImportanceText(level) {
   }
   return texts[level] || level
 }
+
+// 在线状态
+export function getOnlineType(online) {
+  return online ? 'success' : 'danger'
+}
+
+export function getOnlineText(online) {
+  return online ? '在线' : '离线'
+}

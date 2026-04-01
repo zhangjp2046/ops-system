@@ -274,6 +274,10 @@ async function loadCustomers() {
   try {
     const res = await getCustomerList({ page_size: 100 })
     customers.value = res.results || []
+    // 新建时默认选中第一个客户
+    if (!isEdit && customers.value.length > 0 && !form.customer) {
+      form.customer = customers.value[0].id
+    }
   } catch (error) {
     console.error('加载客户失败:', error)
   }
