@@ -34,19 +34,25 @@ class MSSQLHandler:
 
     def test_connect(self):
         """
-        尝试多种方法连接MSSQL
+        尝试多种方法连接MSSQL，优先使用 tsql（与巡检任务一致）
         """
         import time
         
         start_time = time.time()
         
-        # 方法1: 使用pyodbc
+        # 方法1: tsql（与巡检任务一致的方案）
+        result = self._try_tsql_connect()
+        if result['success']:
+            result['response_time'] = (time.time() - start_time) * 1000
+            return result
+        
+        # 方法2: pyodbc
         result = self._try_pyodbc_connect()
         if result['success']:
             result['response_time'] = (time.time() - start_time) * 1000
             return result
         
-        # 方法2: 使用pymssql
+        # 方法3: pymssql
         result = self._try_pymssql_connect()
         if result['success']:
             result['response_time'] = (time.time() - start_time) * 1000
@@ -58,66 +64,28 @@ class MSSQLHandler:
 
     def _try_pyodbc_connect(self):
         """
-        使用pyodbc连接MSSQL，尝试多种连接策略
+        使用 pyodbc 连接 MSSQL（备用方案）
         """
         try:
             import pyodbc
 
-            # 获取所有可用驱动
             all_drivers = list(pyodbc.drivers())
             available_drivers = [x for x in all_drivers if 'SQL' in x or 'ODBC' in x]
 
             if not available_drivers:
                 return {
                     'success': False,
-                    'error': '未找到可用的SQL Server ODBC驱动。请安装 Microsoft ODBC Driver for SQL Server。',
+                    'error': '未找到可用的SQL Server ODBC驱动',
                     'data': {'available_drivers': all_drivers}
                 }
 
-            # 驱动优先级
-            driver_priority = [
-                'ODBC Driver 18 for SQL Server',
-                'ODBC Driver 17 for SQL Server',
-                'ODBC Driver 13 for SQL Server',
-                'SQL Server Native Client 11.0',
-                'SQL Server',
-                'FreeTDS',
+            driver = available_drivers[0]
+
+            # 尝试多种连接字符串组合
+            conn_str_options = [
+                f"DRIVER={{{driver}}};SERVER={self.host},{self.port};DATABASE={self.database or 'master'};UID={self.username};PWD={self.password};Connect Timeout={self.timeout};Encrypt=yes;TrustServerCertificate=yes;",
+                f"DRIVER={{{driver}}};SERVER={self.host},{self.port};DATABASE={self.database or 'master'};UID={self.username};PWD={self.password};Connect Timeout={self.timeout};Encrypt=no;",
             ]
-
-            # 选择最佳驱动
-            driver = None
-            for preferred in driver_priority:
-                for avail in available_drivers:
-                    if preferred.lower() in avail.lower():
-                        driver = avail
-                        break
-                if driver:
-                    break
-            if not driver:
-                driver = available_drivers[0]
-
-            # 尝试多种连接字符串组合（解决加密/TLS兼容性问题）
-            conn_str_options = []
-
-            # 选项1: 标准连接（SQL Server 2019+ 默认）
-            base = (
-                f"DRIVER={{{driver}}};"
-                f"SERVER={self.host},{self.port};"
-                f"DATABASE={self.database or 'master'};"
-                f"UID={self.username};"
-                f"PWD={self.password};"
-                f"Connect Timeout={self.timeout};"
-            )
-            conn_str_options.append(base + "Encrypt=yes;TrustServerCertificate=yes;")
-
-            # 选项2: 不加密（SQL Server 2014及旧版常见配置）
-            conn_str_options.append(base + "Encrypt=no;TrustServerCertificate=yes;")
-
-            # 选项3: 禁用加密和证书验证
-            conn_str_options.append(base + "Encrypt=no;")
-
-            # 选项4: 明确指定MARS和语言
-            conn_str_options.append(base + "MARS_Connection=yes;Language=简体中文;")
 
             last_error = ''
             for conn_str in conn_str_options:
@@ -131,7 +99,7 @@ class MSSQLHandler:
                     return {
                         'success': True,
                         'message': 'pyodbc连接成功',
-                        'data': {'driver_used': driver, 'conn_str_type': conn_str[:80]}
+                        'data': {'driver_used': driver}
                     }
                 except Exception as e:
                     last_error = str(e)
@@ -140,7 +108,7 @@ class MSSQLHandler:
             return {
                 'success': False,
                 'error': f'pyodbc连接失败: {last_error}',
-                'data': {'driver_used': driver, 'available_drivers': all_drivers}
+                'data': {'available_drivers': all_drivers}
             }
         except ImportError:
             return {
@@ -157,32 +125,21 @@ class MSSQLHandler:
 
     def _try_pymssql_connect(self):
         """
-        使用pymssql连接MSSQL，尝试多种连接参数组合
+        使用 pymssql 连接 MSSQL（备用方案）
         """
         try:
             import pymssql
 
-            # 尝试不同的连接参数组合
-            # 关键: server 只传 host，port 要单独传（整型）
-            # tds_version='7.4' 对 SQL Server 2014 兼容
             conn_options = [
-                # 方式1: host + port 分开 + tds_version=7.4（SQL Server 2014 兼容）
                 dict(server=self.host, port=int(self.port),
                      user=self.username, password=self.password,
                      database=self.database or 'master',
                      timeout=self.timeout, login_timeout=self.timeout,
                      tds_version='7.4'),
-                # 方式2: 同上，无 tds_version（让 FreeTDS.conf 决定）
                 dict(server=self.host, port=int(self.port),
                      user=self.username, password=self.password,
                      database=self.database or 'master',
                      timeout=self.timeout, login_timeout=self.timeout),
-                # 方式3: host:port 合并格式
-                dict(server=f"{self.host}:{int(self.port)}",
-                     user=self.username, password=self.password,
-                     database=self.database or 'master',
-                     timeout=self.timeout, login_timeout=self.timeout,
-                     tds_version='7.4'),
             ]
 
             last_error = ''
@@ -197,7 +154,7 @@ class MSSQLHandler:
                     return {
                         'success': True,
                         'message': 'pymssql连接成功',
-                        'data': {'library_used': 'pymssql', 'server_format': str(kwargs.get('server'))}
+                        'data': {'library_used': 'pymssql'}
                     }
                 except Exception as e:
                     last_error = str(e)
@@ -216,6 +173,67 @@ class MSSQLHandler:
             return {
                 'success': False,
                 'error': f'pymssql错误: {str(e)}'
+            }
+
+    def _try_tsql_connect(self):
+        """
+        使用 FreeTDS tsql 命令行连接 MSSQL（与巡检任务一致的方案）
+        """
+        import subprocess
+        import re
+        import os
+
+        # 配置 FreeTDS
+        conf_path = '/tmp/freetds.conf'
+        if not os.path.exists(conf_path):
+            with open(conf_path, 'w') as f:
+                f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
+        os.environ['FREETDSCONF'] = conf_path
+
+        try:
+            cmd = f'TDSVER=7.4 tsql -H {self.host} -p {self.port} ' \
+                  f'-U {self.username} -P "{self.password}" ' \
+                  f'-D {self.database or "master"}'
+
+            proc = subprocess.Popen(
+                cmd, shell=True, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env={**os.environ, 'FREETDSCONF': conf_path}
+            )
+            stdout, stderr = proc.communicate(input='SELECT 1 AS test\nGO\n', timeout=self.timeout)
+
+            # 检查是否有错误
+            if 'Error' in stderr or 'failed' in stderr.lower():
+                return {
+                    'success': False,
+                    'error': f'tsql连接失败: {stderr[:200]}',
+                    'data': {}
+                }
+
+            # 解析输出
+            if '1' in stdout and ('row affected' in stdout.lower() or 'test' in stdout.lower()):
+                return {
+                    'success': True,
+                    'message': 'tsql连接成功',
+                    'data': {'method': 'tsql', 'version': 'tds 7.4'}
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'tsql查询失败: {stdout[:100]}',
+                    'data': {}
+                }
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': 'tsql连接超时',
+                'data': {}
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'tsql错误: {str(e)}',
+                'data': {}
             }
 
             return {

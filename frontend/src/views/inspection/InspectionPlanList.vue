@@ -277,7 +277,7 @@ function handleCreate() {
   dialogTitle.value = '新建计划'
   Object.assign(form, {
     id: null,
-    customer: null,
+    customer: customers.value.length > 0 ? customers.value[0].id : null,
     name: '',
     code: '',
     cycle: 'daily',
