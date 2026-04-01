@@ -259,7 +259,6 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
             return Response({'error': '资产不存在'}, status=404)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-            }
 
 
 class InspectionRecordViewSet(viewsets.ReadOnlyModelViewSet):
