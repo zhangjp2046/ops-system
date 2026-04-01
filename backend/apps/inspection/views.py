@@ -316,6 +316,9 @@ class InspectionRecordViewSet(viewsets.ReadOnlyModelViewSet):
         asset_id = self.request.query_params.get('asset')
         if asset_id:
             queryset = queryset.filter(asset_id=asset_id)
+        overall_status = self.request.query_params.get('overall_status')
+        if overall_status:
+            queryset = queryset.filter(overall_status=overall_status)
         return queryset
     
     def retrieve(self, request, *args, **kwargs):
