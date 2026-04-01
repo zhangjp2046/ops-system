@@ -4,7 +4,7 @@ from .views import (
     MonitoringTaskViewSet, MonitoringResultViewSet,
     AlertRuleViewSet, AlertViewSet
 )
-from .test_views_bak import MonitorTestConfigViewSet, MonitorTestResultViewSet, quick_test
+from .test_views import MonitorTestConfigViewSet, MonitorTestResultViewSet, quick_test
 
 router = DefaultRouter()
 router.register(r'tasks', MonitoringTaskViewSet, basename='monitoring-task')

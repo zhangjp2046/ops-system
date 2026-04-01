@@ -58,34 +58,49 @@ class MSSQLHandler:
 
     def _try_pyodbc_connect(self):
         """
-        使用pyodbc连接MSSQL
+        使用pyodbc连接MSSQL，尝试多种连接策略
         """
         try:
             import pyodbc
-            
-            # 尝试找到合适的驱动
-            available_drivers = [x for x in pyodbc.drivers() if 'SQL Server' in x]
+
+            # 获取所有可用驱动
+            all_drivers = list(pyodbc.drivers())
+            available_drivers = [x for x in all_drivers if 'SQL' in x or 'ODBC' in x]
+
             if not available_drivers:
                 return {
                     'success': False,
                     'error': '未找到可用的SQL Server ODBC驱动。请安装 Microsoft ODBC Driver for SQL Server。',
-                    'data': {'available_drivers': pyodbc.drivers()}
+                    'data': {'available_drivers': all_drivers}
                 }
-            
-            # 优先使用较新的驱动
+
+            # 驱动优先级
+            driver_priority = [
+                'ODBC Driver 18 for SQL Server',
+                'ODBC Driver 17 for SQL Server',
+                'ODBC Driver 13 for SQL Server',
+                'SQL Server Native Client 11.0',
+                'SQL Server',
+                'FreeTDS',
+            ]
+
+            # 选择最佳驱动
             driver = None
-            for d in ['ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server', 'SQL Server Native Client 11.0', 'SQL Server']:
-                for available_driver in available_drivers:
-                    if d.lower() in available_driver.lower():
-                        driver = available_driver
+            for preferred in driver_priority:
+                for avail in available_drivers:
+                    if preferred.lower() in avail.lower():
+                        driver = avail
                         break
                 if driver:
                     break
-            
             if not driver:
-                driver = available_drivers[0]  # 使用第一个可用的驱动
-            
-            conn_str = (
+                driver = available_drivers[0]
+
+            # 尝试多种连接字符串组合（解决加密/TLS兼容性问题）
+            conn_str_options = []
+
+            # 选项1: 标准连接（SQL Server 2019+ 默认）
+            base = (
                 f"DRIVER={{{driver}}};"
                 f"SERVER={self.host},{self.port};"
                 f"DATABASE={self.database or 'master'};"
@@ -93,93 +108,163 @@ class MSSQLHandler:
                 f"PWD={self.password};"
                 f"Connect Timeout={self.timeout};"
             )
-            
-            if self.encrypt:
-                conn_str += "Encrypt=yes;"
-            if self.trust_server_certificate:
-                conn_str += "TrustServerCertificate=yes;"
-            
-            conn = pyodbc.connect(conn_str, timeout=self.timeout)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-            conn.close()
-            
+            conn_str_options.append(base + "Encrypt=yes;TrustServerCertificate=yes;")
+
+            # 选项2: 不加密（SQL Server 2014及旧版常见配置）
+            conn_str_options.append(base + "Encrypt=no;TrustServerCertificate=yes;")
+
+            # 选项3: 禁用加密和证书验证
+            conn_str_options.append(base + "Encrypt=no;")
+
+            # 选项4: 明确指定MARS和语言
+            conn_str_options.append(base + "MARS_Connection=yes;Language=简体中文;")
+
+            last_error = ''
+            for conn_str in conn_str_options:
+                try:
+                    conn = pyodbc.connect(conn_str, timeout=self.timeout)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+                    return {
+                        'success': True,
+                        'message': 'pyodbc连接成功',
+                        'data': {'driver_used': driver, 'conn_str_type': conn_str[:80]}
+                    }
+                except Exception as e:
+                    last_error = str(e)
+                    continue
+
             return {
-                'success': True,
-                'message': 'pyodbc连接成功',
-                'data': {'driver_used': driver}
+                'success': False,
+                'error': f'pyodbc连接失败: {last_error}',
+                'data': {'driver_used': driver, 'available_drivers': all_drivers}
+            }
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'pyodbc未安装',
+                'data': {}
             }
         except Exception as e:
             return {
                 'success': False,
-                'error': f'pyodbc连接失败: {str(e)}',
-                'data': {'available_drivers': pyodbc.drivers()}
+                'error': f'pyodbc错误: {str(e)}',
+                'data': {}
             }
 
     def _try_pymssql_connect(self):
         """
-        使用pymssql连接MSSQL
+        使用pymssql连接MSSQL，尝试多种连接参数组合
         """
         try:
             import pymssql
-            
-            conn = pymssql.connect(
-                server=f"{self.host}:{self.port}",
-                user=self.username,
-                password=self.password,
-                database=self.database or 'master',
-                timeout=self.timeout,
-                login_timeout=self.timeout
-            )
-            
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-            conn.close()
-            
+
+            # 尝试不同的连接参数组合
+            # 关键: server 只传 host，port 要单独传（整型）
+            # tds_version='7.4' 对 SQL Server 2014 兼容
+            conn_options = [
+                # 方式1: host + port 分开 + tds_version=7.4（SQL Server 2014 兼容）
+                dict(server=self.host, port=int(self.port),
+                     user=self.username, password=self.password,
+                     database=self.database or 'master',
+                     timeout=self.timeout, login_timeout=self.timeout,
+                     tds_version='7.4'),
+                # 方式2: 同上，无 tds_version（让 FreeTDS.conf 决定）
+                dict(server=self.host, port=int(self.port),
+                     user=self.username, password=self.password,
+                     database=self.database or 'master',
+                     timeout=self.timeout, login_timeout=self.timeout),
+                # 方式3: host:port 合并格式
+                dict(server=f"{self.host}:{int(self.port)}",
+                     user=self.username, password=self.password,
+                     database=self.database or 'master',
+                     timeout=self.timeout, login_timeout=self.timeout,
+                     tds_version='7.4'),
+            ]
+
+            last_error = ''
+            for kwargs in conn_options:
+                try:
+                    conn = pymssql.connect(**kwargs)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+                    return {
+                        'success': True,
+                        'message': 'pymssql连接成功',
+                        'data': {'library_used': 'pymssql', 'server_format': str(kwargs.get('server'))}
+                    }
+                except Exception as e:
+                    last_error = str(e)
+                    continue
+
             return {
-                'success': True,
-                'message': 'pymssql连接成功',
-                'data': {'library_used': 'pymssql'}
+                'success': False,
+                'error': f'pymssql连接失败: {last_error}'
+            }
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'pymssql未安装'
             }
         except Exception as e:
             return {
                 'success': False,
-                'error': f'pymssql连接失败: {str(e)}'
+                'error': f'pymssql错误: {str(e)}'
+            }
+
+            return {
+                'success': False,
+                'error': f'pymssql连接失败: {last_error}'
+            }
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'pymssql未安装'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'pymssql错误: {str(e)}'
             }
 
 
 def get_protocol_handler(protocol, **kwargs):
     """获取协议处理器"""
+    # MSSQL 专用处理器（pyodbc + pymssql 双保险）
     if protocol == 'mssql':
         return MSSQLHandler(**kwargs)
-    elif protocol == 'ping':
-        # 这里应该实现
-        from .protocols.ping_handler import PingHandler
-        return PingHandler(**kwargs)
+
+    # 其他协议使用 protocols.py 中的实现
+    from .protocols import (
+        PingProtocol, PortCheckProtocol, SSHProtocol,
+        SNMPProtocol, DatabaseProtocol
+    )
+
+    if protocol == 'ping':
+        return PingProtocol(**kwargs)
     elif protocol == 'port':
-        # 这里应该有端口检测处理器的实现
-        from .protocols.port_handler import PortHandler
-        return PortHandler(**kwargs)
+        port = kwargs.pop('port', None)
+        handler = PortCheckProtocol(host=kwargs.get('host'), port=port, timeout=kwargs.get('timeout', 10))
+        return handler
     elif protocol == 'ssh':
-        # 这里应该有SSH处理器的实现
-        from .protocols.ssh_handler import SSHHandler
-        return SSHHandler(**kwargs)
+        return SSHProtocol(**kwargs)
     elif protocol == 'snmp':
-        # 这里应该有SNMP处理器的实现
-        from .protocols.snmp_handler import SNMPHandler
-        return)
+        return SNMPProtocol(**kwargs)
     elif protocol == 'mysql':
-        # 这里        from .protocols.mysql_handler import MySQLHandlerHandler(**kwargs)
+        kwargs.setdefault('port', 3306)
+        return DatabaseProtocol(db_type='mysql', **kwargs)
     elif protocol == 'postgresql':
-        # 这里应该有PostgreSQL处理器的实现
-        from .protocols.postgresql_handler import PostgreSQLHandler
-        return PostgreSQLHandler(**kwargs)
+        kwargs.setdefault('port', 5432)
+        return DatabaseProtocol(db_type='postgresql', **kwargs)
     elif protocol == 'oracle':
-        # 这里应该有Oracle处理器的实现
-        from .protocols.oracle_handler import OracleHandler
-        return OracleHandler(**kwargs)
+        kwargs.setdefault('port', 1521)
+        return DatabaseProtocol(db_type='oracle', **kwargs)
     else:
         raise ValueError(f"Unsupported protocol: {protocol}")
 
@@ -311,12 +396,12 @@ class MonitorTestResultViewSet(viewsets.ReadOnlyModelViewSet):
             failed=Count('id', filter=Q(status='failed')),
             avg_response_time=Avg('response_time'),
             max_response_time=Max('response_time'),
-            min_response_time_time'),
+            min_response_time=Min('response_time'),
         )
-        
+
         # 计算成功率
         if stats['total'] > 0:
-            stats(stats['success'] / stats['total'] * 100, 2)
+            stats['success_rate'] = round(stats['success'] / stats['total'] * 100, 2)
         else:
             stats['success_rate'] = 0
         
@@ -451,7 +536,7 @@ def execute_protocol_test(config):
         }
         
         # 对于 MSSQL 错误进行特殊处理
-        if config.protocol == 'mssql'status'] == 'failed':
+        if config.protocol == 'mssql' and formatted_result['status'] == 'failed':
             error_msg = formatted_result['error']
             if 'Adaptive Server connection failed' in error_msg:
                 formatted_result['error'] += '\n请检查：\n1. MSSQL服务器是否运行\n2. 端口1433是否开放\n3. SQL Server Browser服务是否启动\n4. 是否启用了TCP/IP协议\n5. 防火墙设置\n6. 用户名密码是否正确\n7. 数据库是否允许SQL身份验证'
@@ -511,7 +596,7 @@ def mssql_diagnostics(request):
     
     # 测试端口连通性
     host = request.GET.get('host', 'localhost')
-    port =('port', '1433'))
+    port = request.GET.get('port', '1433')
     
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
