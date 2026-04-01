@@ -169,6 +169,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import axios from '@/utils/axios'
+import api from '@/api/index'
 
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -240,7 +241,7 @@ function loadData() {
     ...(filterForm.customer && { customer: filterForm.customer })
   }
   
-  axios.get('/api/inspection/plans/', { params })
+  api.get('/inspection/plans/', { params })
     .then(res => {
       tableData.value = res.results || []
       pagination.total = res.count || 0
@@ -299,9 +300,9 @@ async function handleSubmit() {
     submitLoading.value = true
     
     const method = form.id ? 'put' : 'post'
-    const url = form.id ? `/api/inspection/plans/${form.id}/` : '/api/inspection/plans/'
+    const url = form.id ? `/inspection/plans/${form.id}/` : '/inspection/plans/'
     
-    await axios[method](url, form)
+    await api[method](url, form)
     ElMessage.success('保存成功')
     dialogVisible.value = false
     loadData()
@@ -315,7 +316,7 @@ async function handleSubmit() {
 async function handleDelete(row) {
   try {
     await ElMessageBox.confirm('确定要删除该巡检计划吗？', '提示', { type: 'warning' })
-    await axios.delete(`/api/inspection/plans/${row.id}/`)
+    await api.delete(`/inspection/plans/${row.id}/`)
     ElMessage.success('删除成功')
     loadData()
   } catch (e) {
@@ -327,7 +328,7 @@ async function handleDelete(row) {
 
 function showTasks(row) {
   currentPlan.value = row
-  axios.get('/api/inspection/tasks/', { params: { plan: row.id } })
+  api.get('/inspection/tasks/', { params: { plan: row.id } })
     .then(res => {
       taskTableData.value = res.results || []
       taskDialogVisible.value = true
@@ -340,7 +341,7 @@ function showTasks(row) {
 async function handleExecute(row) {
   try {
     await ElMessageBox.confirm('确定要执行该巡检计划吗？', '提示', { type: 'info' })
-    await axios.post(`/api/inspection/plans/${row.id}/execute/`)
+    await api.post(`/inspection/plans/${row.id}/execute/`)
     ElMessage.success('执行成功')
     loadData()
   } catch (e) {
@@ -351,7 +352,7 @@ async function handleExecute(row) {
 }
 
 function executeTask(row) {
-  axios.post(`/api/inspection/tasks/${row.id}/execute/`)
+  api.post(`/inspection/tasks/${row.id}/execute/`)
     .then(res => {
       ElMessage.success(`执行完成，发现${res.results?.length || 0}个检查项`)
       showRecords(row)
@@ -367,7 +368,7 @@ function showRecords(row) {
 }
 
 function loadCustomers() {
-  axios.get('/api/customers/customers/', { params: { page_size: 200 } })
+  api.get('/customers/customers/', { params: { page_size: 200 } })
     .then(res => {
       customers.value = res.results || []
     })

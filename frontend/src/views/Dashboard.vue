@@ -263,6 +263,7 @@ import {
   getDashboardStats, getMonitoringStats, getAlertStats, 
   getInspectionStats, getTaskStats 
 } from '@/api/dashboard'
+import api from '@/api/index'
 import * as echarts from 'echarts'
 
 const router = useRouter()
@@ -384,6 +385,12 @@ async function loadTaskStats() {
 
 // 刷新所有数据
 async function refreshAll() {
+  // 先ping检测所有资产，刷新在线状态
+  try {
+    await api.post('/dashboard/health/')
+  } catch (e) {
+    console.error('刷新资产状态失败:', e)
+  }
   await loadAllData()
 }
 

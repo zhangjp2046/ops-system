@@ -52,6 +52,12 @@ const routes = [
         meta: { title: '编辑资产', icon: 'Edit' }
       },
       {
+        path: 'inspection',
+        name: 'Inspection',
+        component: () => import('@/views/inspection/InspectionIndex.vue'),
+        meta: { title: '巡检管理', icon: 'Calendar' }
+      },
+      {
         path: 'inspection/plans',
         name: 'InspectionPlans',
         component: () => import('@/views/inspection/InspectionPlanList.vue'),
@@ -62,6 +68,24 @@ const routes = [
         name: 'InspectionRecords',
         component: () => import('@/views/inspection/InspectionRecordList.vue'),
         meta: { title: '巡检记录', icon: 'Document' }
+      },
+      {
+        path: 'monitoring',
+        name: 'Monitoring',
+        component: () => import('@/views/monitoring/MonitoringIndex.vue'),
+        meta: { title: '监控中心', icon: 'Monitor' }
+      },
+      {
+        path: 'monitoring/alerts',
+        name: 'Alerts',
+        component: () => import('@/views/monitoring/AlertsPage.vue'),
+        meta: { title: '告警中心', icon: 'Bell' }
+      },
+      {
+        path: 'scheduler',
+        name: 'Scheduler',
+        component: () => import('@/views/scheduler/SchedulerIndex.vue'),
+        meta: { title: '定时任务', icon: 'Timer' }
       },
       {
         path: 'monitor-test',

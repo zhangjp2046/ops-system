@@ -11,7 +11,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
-from apps.assets.models import Asset, AssetType
+from apps.assets.models import Asset, AssetType, AssetData
 from apps.customers.models import Customer
 from apps.monitoring.models import MonitoringTask, MonitoringResult, Alert
 from apps.inspection.models import InspectionPlan, InspectionTask, InspectionRecord
@@ -29,8 +29,9 @@ class DashboardStatsView(APIView):
         customer_count = Customer.objects.count()
         asset_total = Asset.objects.count()
         asset_active = Asset.objects.filter(status='ACTIVE').count()
-        asset_online = Asset.objects.filter(status__in=['ONLINE', 'ACTIVE']).count()
-        asset_offline = Asset.objects.filter(status='OFFLINE').count()
+        # 在线/离线以 Asset.online 字段为准（ping 结果）
+        asset_online = Asset.objects.filter(online=True).count()
+        asset_offline = Asset.objects.filter(online=False).count()
         
         # 按状态统计
         status_stats = Asset.objects.values('status').annotate(count=Count('id'))
@@ -318,13 +319,13 @@ class AssetHealthView(APIView):
     
     def get(self, request):
         """获取资产健康状态"""
-        # 正常资产
+        # 正常资产（状态ACTIVE且在线）
         healthy_assets = Asset.objects.filter(
             status='ACTIVE',
             online=True
         ).count()
         
-        # 离线资产
+        # 离线资产（状态ACTIVE但不在线）
         offline_assets = Asset.objects.filter(
             status='ACTIVE',
             online=False
@@ -363,4 +364,78 @@ class AssetHealthView(APIView):
                     'last_check_time': a.last_check_time,
                 } for a in recent_changes],
             }
+        })
+    
+    def post(self, request):
+        """刷新所有资产在线状态（Ping检测）"""
+        import concurrent.futures
+        import subprocess
+        from django.utils import timezone
+        
+        def ping_asset(asset):
+            """Ping单个资产，返回是否在线"""
+            ip = getattr(asset, '_ping_ip', None) or asset.ip_address
+            if not ip:
+                return asset.id, False
+            try:
+                result = subprocess.run(
+                    ['ping', '-c', '1', '-W', '2', ip],
+                    capture_output=True,
+                    timeout=3
+                )
+                return asset.id, result.returncode == 0
+            except:
+                return asset.id, False
+        
+        # 获取所有有IP的资产（优先用Asset.ip_address，否则查AssetData）
+        all_assets = Asset.objects.all()
+        assets_with_ip = []
+        for asset in all_assets:
+            ip = asset.ip_address
+            if not ip:
+                try:
+                    ip_data = AssetData.objects.filter(
+                        asset=asset, field__field_code='ip_address'
+                    ).first()
+                    ip = ip_data.string_value if ip_data else None
+                except:
+                    ip = None
+            if ip:
+                # 临时给 asset 对象挂上 _ping_ip 属性
+                asset._ping_ip = ip
+                assets_with_ip.append(asset)
+        
+        # 并发ping
+        results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(ping_asset, a): a for a in assets_with_ip}
+            for future in concurrent.futures.as_completed(futures, timeout=30):
+                asset_id, is_online = future.result()
+                results[asset_id] = is_online
+        
+        # 批量更新
+        now = timezone.now()
+        updated = 0
+        for asset in assets_with_ip:
+            new_online = results.get(asset.id, False)
+            if asset.online != new_online:
+                asset.online = new_online
+                asset.last_check_time = now
+                asset.save(update_fields=['online', 'last_check_time'])
+                updated += 1
+            else:
+                asset.last_check_time = now
+                asset.save(update_fields=['last_check_time'])
+        
+        online_count = sum(1 for v in results.values() if v)
+        
+        return Response({
+            'success': True,
+            'data': {
+                'total': len(assets_with_ip),
+                'online': online_count,
+                'offline': len(assets_with_ip) - online_count,
+                'updated': updated,
+            },
+            'message': f'检测完成，在线{online_count}，离线{len(assets_with_ip) - online_count}'
         })

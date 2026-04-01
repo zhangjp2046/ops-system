@@ -28,22 +28,36 @@
           <el-icon><Box /></el-icon>
           <template #title>资产管理</template>
         </el-menu-item>
-        
-        <el-menu-item index="/inspection/plans">
-          <el-icon><Calendar /></el-icon>
-          <template #title>巡检计划</template>
+
+        <el-menu-item index="/monitoring">
+          <el-icon><Monitor /></el-icon>
+          <template #title>监控中心</template>
         </el-menu-item>
-        
-        <el-menu-item index="/inspection/records">
-          <el-icon><Document /></el-icon>
-          <template #title>巡检记录</template>
+
+        <el-menu-item index="/monitoring/alerts">
+          <el-icon><Bell /></el-icon>
+          <template #title>告警中心</template>
         </el-menu-item>
-        
+
+        <el-sub-menu index="/inspection">
+          <template #title>
+            <el-icon><Calendar /></el-icon>
+            <span>巡检管理</span>
+          </template>
+          <el-menu-item index="/inspection/plans">巡检计划</el-menu-item>
+          <el-menu-item index="/inspection/records">巡检记录</el-menu-item>
+        </el-sub-menu>
+
+        <el-menu-item index="/scheduler">
+          <el-icon><Timer /></el-icon>
+          <template #title>定时任务</template>
+        </el-menu-item>
+
         <el-menu-item index="/workorder">
           <el-icon><Tickets /></el-icon>
           <template #title>工单管理</template>
         </el-menu-item>
-        
+
         <el-menu-item index="/monitor-test">
           <el-icon><Tools /></el-icon>
           <template #title>采集测试</template>
@@ -95,8 +109,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { 
-  Odometer, OfficeBuilding, Box, 
-  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools
+  Odometer, OfficeBuilding, Box, Monitor, Bell,
+  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools, Timer
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
