@@ -86,7 +86,12 @@ class InspectionRecordSerializer(serializers.ModelSerializer):
 class InspectionRecordDetailSerializer(InspectionRecordSerializer):
     """巡检记录详情序列化器（包含巡检结果）"""
     
-    results = InspectionResultSerializer(many=True, read_only=True)
+    results = serializers.SerializerMethodField()
     
     class Meta(InspectionRecordSerializer.Meta):
         fields = InspectionRecordSerializer.Meta.fields + ['results']
+    
+    def get_results(self, obj):
+        """通过 task 获取巡检结果"""
+        results = InspectionResult.objects.filter(task=obj.task)
+        return InspectionResultSerializer(results, many=True).data
