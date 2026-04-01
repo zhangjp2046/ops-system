@@ -8,11 +8,13 @@ class InspectionPlanSerializer(serializers.ModelSerializer):
     cycle_display = serializers.CharField(source='get_cycle_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     task_count = serializers.SerializerMethodField()
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
     
     class Meta:
         model = InspectionPlan
         fields = [
             'id', 'name', 'code', 'description',
+            'customer', 'customer_name',
             'cycle', 'cycle_display', 'scheduled_time', 'is_auto_execute',
             'status', 'status_display', 'check_items', 'task_count',
             'created_at', 'updated_at'

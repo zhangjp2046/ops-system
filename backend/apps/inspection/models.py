@@ -19,6 +19,13 @@ class InspectionPlan(models.Model):
         ('archived', '归档'),
     ]
     
+    # 关联客户
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='inspection_plans', verbose_name='所属客户',
+        null=True, blank=True
+    )
+    
     # 基本信息
     name = models.CharField('计划名称', max_length=200)
     code = models.CharField('计划编码', max_length=50, unique=True)

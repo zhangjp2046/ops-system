@@ -278,7 +278,8 @@ class MonitorTestConfigViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         
-        #        customer_id = self.request.query_params.get('customer')
+        #        customer_id
+        customer_id = self.request.query_params.get('customer')
         if customer_id:
             queryset = queryset.filter(customer_id=customer_id)
         

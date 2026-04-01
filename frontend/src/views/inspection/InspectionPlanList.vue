@@ -9,6 +9,16 @@
 
     <el-card class="filter-card">
       <el-form :inline="true" :model="filterForm">
+        <el-form-item label="客户">
+          <el-select v-model="filterForm.customer" placeholder="全部客户" clearable filterable style="width: 180px">
+            <el-option
+              v-for="c in customers"
+              :key="c.id"
+              :label="c.customer_name"
+              :value="c.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="filterForm.status" placeholder="全部" clearable>
             <el-option label="草稿" value="draft" />
@@ -26,6 +36,11 @@
     <el-card class="table-card">
       <el-table :data="tableData" v-loading="loading" stripe>
         <el-table-column prop="name" label="计划名称" min-width="150" />
+        <el-table-column prop="customer_name" label="客户" width="150">
+          <template #default="{ row }">
+            {{ row.customer_name || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="code" label="计划编码" width="150" />
         <el-table-column prop="cycle" label="执行周期" width="100">
           <template #default="{ row }">
@@ -83,6 +98,16 @@
       width="600px"
     >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
+        <el-form-item label="所属客户" prop="customer">
+          <el-select v-model="form.customer" placeholder="请选择客户" filterable clearable style="width: 100%">
+            <el-option
+              v-for="c in customers"
+              :key="c.id"
+              :label="c.customer_name"
+              :value="c.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="计划名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入计划名称" />
         </el-form-item>
@@ -100,7 +125,7 @@
           <el-time-picker v-model="form.scheduled_time" format="HH:mm" value-format="HH:mm" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" rows="3" />
+          <el-input v-model="form.description" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -152,7 +177,9 @@ const taskDialogVisible = ref(false)
 const dialogTitle = ref('新建计划')
 const formRef = ref(null)
 
+const customers = ref([])
 const filterForm = reactive({
+  customer: null,
   status: ''
 })
 
@@ -164,6 +191,7 @@ const pagination = reactive({
 
 const form = reactive({
   id: null,
+  customer: null,
   name: '',
   code: '',
   cycle: 'daily',
@@ -208,7 +236,8 @@ function loadData() {
   const params = {
     page: pagination.page,
     page_size: pagination.pageSize,
-    ...(filterForm.status && { status: filterForm.status })
+    ...(filterForm.status && { status: filterForm.status }),
+    ...(filterForm.customer && { customer: filterForm.customer })
   }
   
   axios.get('/api/inspection/plans/', { params })
@@ -230,6 +259,7 @@ function handleFilter() {
 }
 
 function handleReset() {
+  filterForm.customer = null
   filterForm.status = ''
   handleFilter()
 }
@@ -247,6 +277,7 @@ function handleCreate() {
   dialogTitle.value = '新建计划'
   Object.assign(form, {
     id: null,
+    customer: null,
     name: '',
     code: '',
     cycle: 'daily',
@@ -335,8 +366,19 @@ function showRecords(row) {
   ElMessage.info('功能开发中')
 }
 
+function loadCustomers() {
+  axios.get('/api/customers/customers/', { params: { page_size: 200 } })
+    .then(res => {
+      customers.value = res.results || []
+    })
+    .catch(() => {
+      console.error('加载客户失败')
+    })
+}
+
 onMounted(() => {
   loadData()
+  loadCustomers()
 })
 </script>
 
