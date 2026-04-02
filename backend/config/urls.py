@@ -19,6 +19,7 @@ urlpatterns = [
     path('api/inspection/', include('apps.inspection.urls')),
     path('api/dashboard/', include('apps.dashboard.urls')),
     path('api/workorder/', include('apps.workorder.urls')),
+    path('api/system/', include('apps.system.urls')),
 ]
 
 # 开发环境静态文件服务

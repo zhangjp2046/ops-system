@@ -92,6 +92,12 @@ const routes = [
         name: 'MonitorTest',
         component: () => import('@/views/monitoring/MonitorTest.vue'),
         meta: { title: '采集测试', icon: 'Tools' }
+      },
+      {
+        path: 'system',
+        name: 'SystemSettings',
+        component: () => import('@/views/system/SystemSettings.vue'),
+        meta: { title: '系统设置', icon: 'Setting' }
       }
     ]
   },

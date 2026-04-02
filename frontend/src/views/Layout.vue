@@ -57,6 +57,11 @@
           <el-icon><Tools /></el-icon>
           <template #title>采集测试</template>
         </el-menu-item>
+
+        <el-menu-item index="/system">
+          <el-icon><Setting /></el-icon>
+          <template #title>系统设置</template>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     
@@ -105,7 +110,7 @@ import { useUserStore } from '@/store/user'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { 
   Odometer, OfficeBuilding, Box, Monitor, Bell,
-  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools, Timer
+  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools, Timer, Setting
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
