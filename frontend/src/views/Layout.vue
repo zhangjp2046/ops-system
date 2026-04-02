@@ -53,11 +53,6 @@
           <template #title>定时任务</template>
         </el-menu-item>
 
-        <el-menu-item index="/workorder">
-          <el-icon><Tickets /></el-icon>
-          <template #title>工单管理</template>
-        </el-menu-item>
-
         <el-menu-item index="/monitor-test">
           <el-icon><Tools /></el-icon>
           <template #title>采集测试</template>

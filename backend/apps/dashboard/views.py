@@ -29,6 +29,7 @@ class DashboardStatsView(APIView):
         customer_count = Customer.objects.count()
         asset_total = Asset.objects.count()
         asset_active = Asset.objects.filter(status='ACTIVE').count()
+        
         # 在线/离线以 Asset.online 字段为准（ping 结果）
         asset_online = Asset.objects.filter(online=True).count()
         asset_offline = Asset.objects.filter(online=False).count()
@@ -51,6 +52,11 @@ class DashboardStatsView(APIView):
             'customer__customer_code'
         ).annotate(count=Count('id'))
         
+        # 获取最近检查时间
+        last_check = Asset.objects.filter(
+            last_check_time__isnull=False
+        ).order_by('-last_check_time').values_list('last_check_time', flat=True).first()
+        
         return Response({
             'success': True,
             'data': {
@@ -60,6 +66,7 @@ class DashboardStatsView(APIView):
                     'active_assets': asset_active,
                     'online_assets': asset_online,
                     'offline_assets': asset_offline,
+                    'last_check_time': last_check,
                 },
                 'status_distribution': list(status_stats),
                 'importance_distribution': list(importance_stats),
@@ -143,59 +150,69 @@ class AlertStatsView(APIView):
     
     def get(self, request):
         """获取告警统计数据"""
+        from apps.alerts.models import Alert as AlertModel
+        
         # 告警总体统计
-        alert_total = Alert.objects.count()
-        alert_open = Alert.objects.filter(status='open').count()
-        alert_acknowledged = Alert.objects.filter(status='acknowledged').count()
-        alert_resolved = Alert.objects.filter(status='resolved').count()
-        alert_closed = Alert.objects.filter(status='closed').count()
+        alert_total = AlertModel.objects.count()
+        
+        # 按状态统计（使用实际的 STATUS_CHOICES）
+        status_stats = {}
+        for code, label in AlertModel.STATUS_CHOICES:
+            status_stats[code] = AlertModel.objects.filter(status=code).count()
+        
+        # 未处理告警数 = NEW + ACKNOWLEDGED + IN_PROGRESS
+        unhandled_count = sum(
+            status_stats.get(s, 0) for s in ['NEW', 'ACKNOWLEDGED', 'IN_PROGRESS']
+        )
         
         # 按严重程度统计
-        severity_stats = Alert.objects.values('severity').annotate(count=Count('id'))
+        severity_stats = list(AlertModel.objects.values('severity').annotate(count=Count('id')))
+        
+        # 按来源统计
+        source_stats = list(AlertModel.objects.values('source').annotate(count=Count('id')))
         
         # 今日新增告警
         today = timezone.now().date()
-        alert_today = Alert.objects.filter(occurred_at__date=today).count()
-        
-        # 最近7天告警趋势
-        week_ago = timezone.now() - timedelta(days=7)
-        recent_alerts = Alert.objects.filter(occurred_at__gte=week_ago)
+        alert_today = AlertModel.objects.filter(occurred_at__date=today).count()
         
         # 最近24小时告警
         yesterday = timezone.now() - timedelta(hours=24)
-        alert_recent_24h = Alert.objects.filter(occurred_at__gte=yesterday).count()
+        alert_recent_24h = AlertModel.objects.filter(occurred_at__gte=yesterday).count()
         
-        # 未处理的告警
-        unhandled_alerts = Alert.objects.filter(
-            status__in=['open', 'acknowledged']
-        ).order_by('-occurred_at')[:10]
-        
-        # 高危告警
-        critical_alerts = Alert.objects.filter(
-            severity='CRITICAL',
-            status__in=['open', 'acknowledged']
+        # 高危告警（严重程度>=3 且未处理）
+        critical_count = AlertModel.objects.filter(
+            severity__gte=3,
+            status__in=['NEW', 'ACKNOWLEDGED', 'IN_PROGRESS']
         ).count()
+        
+        # 未处理的告警（最新10条）
+        unhandled_alerts = AlertModel.objects.filter(
+            status__in=['NEW', 'ACKNOWLEDGED', 'IN_PROGRESS']
+        ).select_related('asset', 'customer').order_by('-occurred_at')[:10]
         
         return Response({
             'success': True,
             'data': {
                 'total': alert_total,
-                'by_status': {
-                    'open': alert_open,
-                    'acknowledged': alert_acknowledged,
-                    'resolved': alert_resolved,
-                    'closed': alert_closed,
-                },
-                'by_severity': list(severity_stats),
+                'unhandled_count': unhandled_count,
+                'by_status': status_stats,
+                'by_severity': {item['severity']: item['count'] for item in severity_stats},
+                'by_source': {item['source']: item['count'] for item in source_stats},
                 'today_count': alert_today,
                 'recent_24h_count': alert_recent_24h,
-                'critical_count': critical_alerts,
+                'critical_count': critical_count,
                 'unhandled_alerts': [{
                     'id': a.id,
                     'title': a.title,
-                    'severity': a.severity,
+                    'severity': a.get_severity_display(),
+                    'severity_code': a.severity,
                     'status': a.status,
+                    'status_display': a.get_status_display(),
+                    'source': a.source,
+                    'source_display': a.get_source_display(),
+                    'alert_type': a.alert_type,
                     'asset_name': a.asset.asset_name if a.asset else None,
+                    'customer_name': a.customer.customer_name if a.customer else None,
                     'occurred_at': a.occurred_at,
                 } for a in unhandled_alerts],
             }
@@ -313,7 +330,7 @@ class TaskStatsView(APIView):
 
 
 class AssetHealthView(APIView):
-    """资产健康状态"""
+    """资产健康状态 - Ping检测"""
     
     permission_classes = [permissions.AllowAny]
     
@@ -337,10 +354,10 @@ class AssetHealthView(APIView):
         # 维护中资产
         maintenance_assets = Asset.objects.filter(status='MAINTENANCE').count()
         
-        # 最近状态变更的资产
-        recent_changes = Asset.objects.filter(
-            status_history__isnull=False
-        ).order_by('-status_history__created_at')[:10]
+        # 最近检查时间
+        last_check = Asset.objects.filter(
+            last_check_time__isnull=False
+        ).order_by('-last_check_time').values_list('last_check_time', flat=True).first()
         
         # 计算健康度
         total_active = Asset.objects.filter(status='ACTIVE').count()
@@ -356,86 +373,32 @@ class AssetHealthView(APIView):
                 'inactive_assets': inactive_assets,
                 'maintenance_assets': maintenance_assets,
                 'health_rate': health_rate,
-                'recent_changes': [{
-                    'asset_name': a.asset_name,
-                    'asset_code': a.asset_code,
-                    'status': a.status,
-                    'online': a.online,
-                    'last_check_time': a.last_check_time,
-                } for a in recent_changes],
+                'last_check_time': last_check,
             }
         })
     
     def post(self, request):
-        """刷新所有资产在线状态（Ping检测）"""
-        import concurrent.futures
-        import subprocess
-        from django.utils import timezone
+        """
+        刷新所有资产在线状态（Ping检测）
+        使用并发ping，更新Asset.online字段
+        """
+        from .ping_service import check_all_assets
         
-        def ping_asset(asset):
-            """Ping单个资产，返回是否在线"""
-            ip = getattr(asset, '_ping_ip', None) or asset.ip_address
-            if not ip:
-                return asset.id, False
-            try:
-                result = subprocess.run(
-                    ['ping', '-c', '1', '-W', '2', ip],
-                    capture_output=True,
-                    timeout=3
-                )
-                return asset.id, result.returncode == 0
-            except:
-                return asset.id, False
+        # 获取参数
+        max_workers = int(request.data.get('max_workers', 20))
         
-        # 获取所有有IP的资产（优先用Asset.ip_address，否则查AssetData）
-        all_assets = Asset.objects.all()
-        assets_with_ip = []
-        for asset in all_assets:
-            ip = asset.ip_address
-            if not ip:
-                try:
-                    ip_data = AssetData.objects.filter(
-                        asset=asset, field__field_code='ip_address'
-                    ).first()
-                    ip = ip_data.string_value if ip_data else None
-                except:
-                    ip = None
-            if ip:
-                # 临时给 asset 对象挂上 _ping_ip 属性
-                asset._ping_ip = ip
-                assets_with_ip.append(asset)
-        
-        # 并发ping
-        results = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(ping_asset, a): a for a in assets_with_ip}
-            for future in concurrent.futures.as_completed(futures, timeout=30):
-                asset_id, is_online = future.result()
-                results[asset_id] = is_online
-        
-        # 批量更新
-        now = timezone.now()
-        updated = 0
-        for asset in assets_with_ip:
-            new_online = results.get(asset.id, False)
-            if asset.online != new_online:
-                asset.online = new_online
-                asset.last_check_time = now
-                asset.save(update_fields=['online', 'last_check_time'])
-                updated += 1
-            else:
-                asset.last_check_time = now
-                asset.save(update_fields=['last_check_time'])
-        
-        online_count = sum(1 for v in results.values() if v)
+        # 执行检测
+        result = check_all_assets(max_workers=max_workers)
         
         return Response({
             'success': True,
             'data': {
-                'total': len(assets_with_ip),
-                'online': online_count,
-                'offline': len(assets_with_ip) - online_count,
-                'updated': updated,
+                'total': result['total'],
+                'online': result['online'],
+                'offline': result['offline'],
+                'skipped': result['skipped'],
+                'updated': result['updated'],
+                'elapsed_seconds': result['elapsed_seconds'],
             },
-            'message': f'检测完成，在线{online_count}，离线{len(assets_with_ip) - online_count}'
+            'message': f'检测完成: 在线{result["online"]}台, 离线{result["offline"]}台, 耗时{result["elapsed_seconds"]}秒'
         })

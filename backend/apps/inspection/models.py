@@ -19,6 +19,17 @@ class InspectionPlan(models.Model):
         ('archived', '归档'),
     ]
     
+    PROTOCOL_CHOICES = [
+        ('mysql', 'MySQL'),
+        ('mssql', 'MSSQL'),
+        ('oracle', 'Oracle'),
+        ('postgresql', 'PostgreSQL'),
+        ('snmp', 'SNMP'),
+        ('ssh', 'SSH'),
+        ('ping', 'Ping'),
+        ('port', '端口检测'),
+    ]
+    
     # 关联客户
     customer = models.ForeignKey(
         'customers.Customer', on_delete=models.CASCADE,
@@ -30,6 +41,9 @@ class InspectionPlan(models.Model):
     name = models.CharField('计划名称', max_length=200)
     code = models.CharField('计划编码', max_length=50, unique=True)
     description = models.TextField('计划描述', blank=True)
+    
+    # 巡检协议类型
+    protocol = models.CharField('协议类型', max_length=20, choices=PROTOCOL_CHOICES, default='mysql')
     
     # 巡检配置
     cycle = models.CharField('执行周期', max_length=20, choices=CYCLE_CHOICES, default='daily')

@@ -59,12 +59,13 @@ class AssetSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'customer', 'customer_name', 'asset_type', 'asset_type_name',
             'asset_code', 'asset_name', 'description',
+            'ip_address', 'online', 'last_check_time',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
             'protocol', 'db_type', 'port', 'username', 'password', 'database',
             'purchase_date', 'warranty_end', 'decommission_date',
             'owner', 'department', 'vendor',
-            'field_data', 'online', 'last_check_time',
+            'field_data',
             'created_at', 'updated_at',
             'created_by', 'updated_by'
         ]
@@ -94,6 +95,7 @@ class AssetCreateSerializer(serializers.ModelSerializer):
         model = Asset
         fields = [
             'customer', 'asset_type', 'asset_code', 'asset_name', 'description',
+            'ip_address',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
             'protocol', 'db_type', 'port', 'username', 'password', 'database',
@@ -166,6 +168,7 @@ class AssetUpdateSerializer(serializers.ModelSerializer):
         model = Asset
         fields = [
             'asset_name', 'description',
+            'ip_address',
             'location', 'room', 'rack', 'position',
             'status', 'importance_level',
             'protocol', 'db_type', 'port', 'username', 'password', 'database',

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import InspectionPlan, InspectionTask, InspectionResult, InspectionRecord
+from .check_items import get_check_items_by_protocol, get_all_protocols, get_protocol_categories
 
 
 class InspectionPlanSerializer(serializers.ModelSerializer):
@@ -7,22 +8,30 @@ class InspectionPlanSerializer(serializers.ModelSerializer):
     
     cycle_display = serializers.CharField(source='get_cycle_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    protocol_display = serializers.CharField(source='get_protocol_display', read_only=True)
     task_count = serializers.SerializerMethodField()
     customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    available_checks = serializers.SerializerMethodField()
     
     class Meta:
         model = InspectionPlan
         fields = [
             'id', 'name', 'code', 'description',
+            'protocol', 'protocol_display',
             'customer', 'customer_name',
             'cycle', 'cycle_display', 'scheduled_time', 'is_auto_execute',
             'status', 'status_display', 'check_items', 'task_count',
+            'available_checks',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_task_count(self, obj):
         return obj.tasks.count()
+    
+    def get_available_checks(self, obj):
+        """返回该协议可用的巡检项目列表"""
+        return get_check_items_by_protocol(obj.protocol)
 
 
 class InspectionTaskSerializer(serializers.ModelSerializer):

@@ -4,9 +4,12 @@
     <div class="page-header">
       <h2>运维驾驶舱</h2>
       <div class="header-actions">
-        <el-button type="primary" @click="refreshAll">
+        <span v-if="lastCheckTime" class="last-check-time">
+          最后检测: {{ formatTime(lastCheckTime) }}
+        </span>
+        <el-button type="primary" :loading="refreshing" @click="refreshAll">
           <el-icon><Refresh /></el-icon>
-          刷新数据
+          {{ refreshing ? '检测中...' : '刷新数据' }}
         </el-button>
       </div>
     </div>
@@ -45,6 +48,7 @@
           <div class="stat-info">
             <div class="stat-value">{{ stats.overview.online_assets }}</div>
             <div class="stat-label">在线资产</div>
+            <div class="stat-sub">{{ onlinePercentage }}%</div>
           </div>
         </div>
       </el-col>
@@ -57,6 +61,7 @@
           <div class="stat-info">
             <div class="stat-value">{{ stats.overview.offline_assets }}</div>
             <div class="stat-label">离线资产</div>
+            <div class="stat-sub">{{ offlinePercentage }}%</div>
           </div>
         </div>
       </el-col>
@@ -157,15 +162,20 @@
               <el-button type="primary" link @click="goToAlerts">查看全部</el-button>
             </div>
           </template>
-          <el-table :data="alertStats.unhandled_alerts || []" stripe>
-            <el-table-column prop="title" label="告警标题" />
-            <el-table-column prop="severity" label="严重程度" width="100">
+          <el-table :data="alertStats.unhandled_alerts || []" stripe size="small">
+            <el-table-column prop="title" label="告警标题" min-width="180" show-overflow-tooltip />
+            <el-table-column label="来源" width="80">
               <template #default="{ row }">
-                <el-tag :type="getSeverityType(row.severity)">{{ row.severity }}</el-tag>
+                <el-tag :type="getSourceType(row.source)" size="small">{{ row.source_display || row.source }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="asset_name" label="资产" width="150" />
-            <el-table-column prop="occurred_at" label="时间" width="150">
+            <el-table-column label="严重程度" width="80">
+              <template #default="{ row }">
+                <el-tag :type="getSeverityType(row.severity)" size="small">{{ row.severity }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="asset_name" label="资产" width="120" show-overflow-tooltip />
+            <el-table-column label="时间" width="130">
               <template #default="{ row }">
                 {{ formatTime(row.occurred_at) }}
               </template>
@@ -253,7 +263,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { 
   OfficeBuilding, Box, CircleCheck, CircleClose, 
@@ -261,12 +271,15 @@ import {
 } from '@element-plus/icons-vue'
 import { 
   getDashboardStats, getMonitoringStats, getAlertStats, 
-  getInspectionStats, getTaskStats 
+  getInspectionStats, getTaskStats, getAssetHealth 
 } from '@/api/dashboard'
-import api from '@/api/index'
 import * as echarts from 'echarts'
 
 const router = useRouter()
+
+// 刷新状态
+const refreshing = ref(false)
+const lastCheckTime = ref(null)
 
 // 统计数据
 const stats = reactive({
@@ -298,6 +311,19 @@ const taskStats = reactive({
   recent_executions: [],
 })
 
+// 计算百分比
+const onlinePercentage = computed(() => {
+  const total = stats.overview.online_assets + stats.overview.offline_assets
+  if (total === 0) return 0
+  return Math.round(stats.overview.online_assets / total * 100)
+})
+
+const offlinePercentage = computed(() => {
+  const total = stats.overview.online_assets + stats.overview.offline_assets
+  if (total === 0) return 0
+  return Math.round(stats.overview.offline_assets / total * 100)
+})
+
 // 图表引用
 const typeChartRef = ref(null)
 const statusChartRef = ref(null)
@@ -325,7 +351,15 @@ async function loadDashboardStats() {
   try {
     const res = await getDashboardStats()
     if (res.success) {
-      Object.assign(stats, res.data)
+      Object.assign(stats.overview, res.data.overview || {})
+      stats.type_distribution = res.data.type_distribution
+      stats.status_distribution = res.data.status_distribution
+      stats.customer_distribution = res.data.customer_distribution
+      
+      // 更新最后检查时间
+      if (res.data.overview?.last_check_time) {
+        lastCheckTime.value = res.data.overview.last_check_time
+      }
     }
   } catch (error) {
     console.error('加载驾驶舱统计失败:', error)
@@ -349,7 +383,7 @@ async function loadAlertStats() {
   try {
     const res = await getAlertStats()
     if (res.success) {
-      alertStats.unhandled_count = (res.data.by_status?.open || 0) + (res.data.by_status?.acknowledged || 0)
+      alertStats.unhandled_count = res.data.unhandled_count || 0
       alertStats.unhandled_alerts = res.data.unhandled_alerts || []
     }
   } catch (error) {
@@ -383,15 +417,26 @@ async function loadTaskStats() {
   }
 }
 
-// 刷新所有数据
+// 刷新所有数据 - 先执行Ping检测，再加载数据
 async function refreshAll() {
-  // 先ping检测所有资产，刷新在线状态
+  if (refreshing.value) return
+  
+  refreshing.value = true
   try {
-    await api.post('/dashboard/health/')
-  } catch (e) {
-    console.error('刷新资产状态失败:', e)
+    // 1. 执行Ping检测所有资产
+    const pingRes = await getAssetHealth()
+    if (pingRes.success) {
+      console.log('Ping检测完成:', pingRes.message)
+    }
+    
+    // 2. 重新加载所有统计数据
+    await loadAllData()
+    
+  } catch (error) {
+    console.error('刷新失败:', error)
+  } finally {
+    refreshing.value = false
   }
-  await loadAllData()
 }
 
 // 初始化图表
@@ -489,9 +534,24 @@ function goToTasks() {
 
 // 工具函数
 function getSeverityType(severity) {
-  const s = (severity || '').toUpperCase()
-  const types = { 'CRITICAL': 'danger', 'HIGH': 'danger', 'MEDIUM': 'warning', 'LOW': 'info', 'WARNING': 'warning' }
-  return types[s] || 'info'
+  // 后端返回的是中文显示文本（如 "信息"、"警告"、"错误"、"严重"）
+  // severity_code 为数字 1-4
+  const s = String(severity || '').toUpperCase()
+  if (s === '严重' || s === 'CRITICAL' || s === '4') return 'danger'
+  if (s === '错误' || s === 'HIGH' || s === '3') return 'danger'
+  if (s === '警告' || s === 'WARNING' || s === 'MEDIUM' || s === '2') return 'warning'
+  return 'info'
+}
+
+function getSourceType(source) {
+  const types = {
+    'PING': 'danger',
+    'INSPECTION': 'warning',
+    'LOCAL': 'info',
+    'MANUAL': '',
+    'SCHEDULED': 'success',
+  }
+  return types[source] || 'info'
 }
 
 function getStatusType(status) {
@@ -542,8 +602,8 @@ let refreshInterval = null
 
 onMounted(() => {
   loadAllData()
-  // 每30秒自动刷新数据
-  refreshInterval = setInterval(loadAllData, 30000)
+  // 每60秒自动刷新数据（不执行ping，只刷新统计）
+  refreshInterval = setInterval(loadDashboardStats, 60000)
   window.addEventListener('resize', handleResize)
 })
 
@@ -580,6 +640,13 @@ onUnmounted(() => {
 .header-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+.last-check-time {
+  font-size: 13px;
+  color: #909399;
+  margin-right: 10px;
 }
 
 .stats-row {
@@ -637,6 +704,16 @@ onUnmounted(() => {
   font-size: 14px;
   color: #909399;
   margin-top: 4px;
+}
+
+.stat-sub {
+  font-size: 12px;
+  color: #67c23a;
+  margin-top: 2px;
+}
+
+.stat-card.offline .stat-sub {
+  color: #f56c6c;
 }
 
 .charts-row {

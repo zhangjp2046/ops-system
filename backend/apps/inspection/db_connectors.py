@@ -114,10 +114,11 @@ class MySQLConnector(BaseConnector):
     def __init__(self, config):
         super().__init__(config)
         self._conn = None
+        import pymysql
+        self._pymysql = pymysql
 
     def connect(self):
-        import pymysql
-        self._conn = pymysql.connect(
+        self._conn = self._pymysql.connect(
             host=self.config['host'],
             port=int(self.config.get('port', 3306)),
             user=self.config['username'],
@@ -131,7 +132,7 @@ class MySQLConnector(BaseConnector):
             self._conn.close()
 
     def query(self, sql):
-        with self._conn.cursor(pymysql.cursors.DictCursor) as cur:
+        with self._conn.cursor(self._pymysql.cursors.DictCursor) as cur:
             cur.execute(sql)
             return cur.fetchall()
 
@@ -651,27 +652,35 @@ def get_connector(config):
 
 def get_connector_from_asset(asset):
     """从资产信息构建连接器"""
+    # 优先使用Asset模型的直接字段
+    host = asset.ip_address or _get_field(asset, 'db_host') or _get_field(asset, 'host_address') or 'localhost'
+    port = asset.port or _get_field(asset, 'db_port') or '3306'
+    username = asset.username or _get_field(asset, 'db_username') or ''
+    password = asset.password or _get_field(asset, 'db_password') or ''
+    database = asset.database or _get_field(asset, 'db_name') or _get_field(asset, 'database_name') or ''
+    
     config = {
-        'host': _get_field(asset, 'db_host') or _get_field(asset, 'host_address') or asset.location or 'localhost',
-        'port': _get_field(asset, 'db_port') or _get_field(asset, 'port') or '3306',
-        'database': _get_field(asset, 'db_name') or _get_field(asset, 'database_name') or 'master',
-        'username': _get_field(asset, 'db_username') or _get_field(asset, 'username') or '',
-        'password': _get_field(asset, 'db_password') or _get_field(asset, 'password') or '',
-        'db_type': _get_field(asset, 'database_type') or 'MYSQL',
+        'host': host,
+        'port': port,
+        'database': database,
+        'username': username,
+        'password': password,
+        'db_type': _get_field(asset, 'database_type') or (asset.db_type.upper() if asset.db_type else 'MYSQL'),
     }
 
     # 自动判断类型
     name = asset.asset_name.lower()
     if 'mssql' in name or 'sql server' in name:
         config['db_type'] = 'MSSQL'
-        config.setdefault('port', '1433')
-        config.setdefault('database', 'master')
+        if not config['port']: config['port'] = '1433'
+        if not config['database']: config['database'] = 'master'
     elif 'oracle' in name:
         config['db_type'] = 'ORACLE'
-        config.setdefault('port', '1521')
+        if not config['port']: config['port'] = '1521'
     elif 'mysql' in name or 'mariadb' in name:
         config['db_type'] = 'MYSQL'
-        config.setdefault('port', '3306')
+        if not config['port']: config['port'] = '3306'
+        if not config['database']: config['database'] = 'mysql'
 
     return get_connector(config)
 

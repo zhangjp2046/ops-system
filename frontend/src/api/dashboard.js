@@ -25,7 +25,7 @@ export function getTaskStats() {
   return api.get('/dashboard/tasks/')
 }
 
-// 获取资产健康状态
+// 获取资产健康状态（GET）或刷新所有资产在线状态（POST - Ping检测）
 export function getAssetHealth() {
-  return api.get('/dashboard/health/')
+  return api.post('/dashboard/health/')
 }

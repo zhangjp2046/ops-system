@@ -21,6 +21,8 @@ class Alert(models.Model):
     ]
     
     SOURCE_CHOICES = [
+        ('PING', '连通性检测'),
+        ('INSPECTION', '巡检结果'),
         ('LOCAL', '本地监控'),
         ('MANUAL', '手动'),
         ('SCHEDULED', '定时任务'),

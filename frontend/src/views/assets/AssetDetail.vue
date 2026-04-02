@@ -36,7 +36,12 @@
       <el-col :span="16">
         <el-card class="info-card">
           <template #header>
-            <span>基本信息</span>
+            <div class="card-header">
+              <span>基本信息</span>
+              <el-tag :type="asset.online ? 'success' : 'danger'" size="small">
+                {{ asset.online ? '在线' : '离线' }}
+              </el-tag>
+            </div>
           </template>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="资产编号">
@@ -61,6 +66,51 @@
                 {{ getImportanceText(asset.importance_level) }}
               </el-tag>
             </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+        
+        <!-- 网络信息 -->
+        <el-card class="info-card">
+          <template #header>
+            <span>网络信息</span>
+          </template>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="IP地址">
+              <span class="ip-address">{{ asset.ip_address || '-' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="在线状态">
+              <el-tag :type="asset.online ? 'success' : 'danger'">
+                {{ asset.online ? '在线' : '离线' }}
+              </el-tag>
+              <span v-if="asset.last_check_time" class="check-time">
+                ({{ formatTime(asset.last_check_time) }})
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="采集协议">
+              <el-tag v-if="asset.protocol" type="info">{{ getProtocolName(asset.protocol) }}</el-tag>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="端口">
+              {{ asset.port || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="用户名" v-if="asset.username">
+              {{ asset.username }}
+            </el-descriptions-item>
+            <el-descriptions-item label="数据库类型" v-if="asset.db_type">
+              {{ asset.db_type?.toUpperCase() }}
+            </el-descriptions-item>
+            <el-descriptions-item label="数据库名" v-if="asset.database">
+              {{ asset.database }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+        
+        <!-- 位置信息 -->
+        <el-card class="info-card">
+          <template #header>
+            <span>位置信息</span>
+          </template>
+          <el-descriptions :column="2" border>
             <el-descriptions-item label="位置">
               {{ asset.location || '-' }}
             </el-descriptions-item>
@@ -70,6 +120,15 @@
             <el-descriptions-item label="机柜">
               {{ asset.rack || '-' }}
             </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+        
+        <!-- 责任信息 -->
+        <el-card class="info-card">
+          <template #header>
+            <span>责任信息</span>
+          </template>
+          <el-descriptions :column="2" border>
             <el-descriptions-item label="负责人">
               {{ asset.owner || '-' }}
             </el-descriptions-item>
@@ -85,13 +144,18 @@
             <el-descriptions-item label="保修到期">
               {{ formatDate(asset.warranty_end) }}
             </el-descriptions-item>
-            <el-descriptions-item label="描述" :span="2">
-              {{ asset.description || '-' }}
-            </el-descriptions-item>
           </el-descriptions>
         </el-card>
         
-        <!-- 字段数据 -->
+        <!-- 描述 -->
+        <el-card v-if="asset.description" class="info-card">
+          <template #header>
+            <span>描述</span>
+          </template>
+          <p class="description">{{ asset.description }}</p>
+        </el-card>
+        
+        <!-- 动态字段 -->
         <el-card v-if="Object.keys(asset.field_data || {}).length > 0" class="info-card">
           <template #header>
             <span>配置信息</span>
@@ -211,6 +275,26 @@ async function handleDelete() {
     }
   }
 }
+
+function formatTime(time) {
+  if (!time) return '-'
+  const date = new Date(time)
+  return date.toLocaleString('zh-CN')
+}
+
+function getProtocolName(protocol) {
+  const names = {
+    'snmp': 'SNMP',
+    'ssh': 'SSH',
+    'ping': 'Ping',
+    'mysql': 'MySQL',
+    'mssql': 'MSSQL',
+    'oracle': 'Oracle',
+    'postgresql': 'PostgreSQL',
+    'port': '端口检测'
+  }
+  return names[protocol] || protocol
+}
 </script>
 
 <style scoped>
@@ -232,5 +316,29 @@ async function handleDelete() {
 
 .info-card {
   margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ip-address {
+  font-family: monospace;
+  font-weight: 600;
+  color: #409eff;
+}
+
+.check-time {
+  font-size: 12px;
+  color: #909399;
+  margin-left: 8px;
+}
+
+.description {
+  margin: 0;
+  line-height: 1.6;
+  color: #606266;
 }
 </style>
