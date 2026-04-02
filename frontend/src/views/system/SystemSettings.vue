@@ -19,10 +19,10 @@
               <el-input v-model="customerForm.customer_name" style="width: 350px" />
             </el-form-item>
             <el-form-item label="客户编码">
-              <el-input v-model="customerForm.customer_code" style="width: 200px" disabled />
+              <el-input v-model="customerForm.customer_code" style="width: 200px" />
             </el-form-item>
             <el-form-item label="联系人">
-              <el-input v-model="customerForm.contact_name" style="width: 250px" />
+              <el-input v-model="customerForm.contact_person" style="width: 250px" />
             </el-form-item>
             <el-form-item label="联系电话">
               <el-input v-model="customerForm.contact_phone" style="width: 200px" />
@@ -160,7 +160,7 @@ const verifyResult = ref(null)
 // 客户信息
 const customerForm = reactive({
   id: null, customer_name: '', customer_code: '',
-  contact_name: '', contact_phone: '', contact_email: '', address: ''
+  contact_person: '', contact_phone: '', contact_email: '', address: ''
 })
 
 // 推送/通知表单
@@ -173,14 +173,19 @@ function markDirty(key) { dirtyKeys.value.add(key) }
 // ========== 客户信息 ==========
 async function loadCustomer() {
   try {
-    const res = await api.get('/customers/')
-    const list = res.results || res.data?.results || []
+    const res = await api.get('/customers/customers/', { params: { page_size: 1 } })
+    const body = res.data ?? res
+    const list = body.results || body.data?.results || []
     if (list.length > 0) {
       const c = list[0]
       Object.assign(customerForm, {
-        id: c.id, customer_name: c.customer_name, customer_code: c.customer_code,
-        contact_name: c.contact_name || '', contact_phone: c.contact_phone || '',
-        contact_email: c.contact_email || '', address: c.address || ''
+        id: c.id,
+        customer_name: c.customer_name || '',
+        customer_code: c.customer_code || '',
+        contact_person: c.contact_person || '',
+        contact_phone: c.contact_phone || '',
+        contact_email: c.contact_email || '',
+        address: c.address || ''
       })
     }
   } catch (e) { console.error('加载客户失败:', e) }
@@ -190,15 +195,27 @@ async function saveCustomer() {
   if (!customerForm.customer_name) { ElMessage.warning('请填写客户名称'); return }
   savingCustomer.value = true
   try {
+    const data = {
+      customer_name: customerForm.customer_name,
+      customer_code: customerForm.customer_code,
+      contact_person: customerForm.contact_person,
+      contact_phone: customerForm.contact_phone,
+      contact_email: customerForm.contact_email,
+      address: customerForm.address,
+    }
     if (customerForm.id) {
-      await api.patch(`/customers/${customerForm.id}/`, customerForm)
+      await api.patch(`/customers/customers/${customerForm.id}/`, data)
     } else {
-      const res = await api.post('/customers/', customerForm)
-      customerForm.id = res.id || res.data?.id
+      const res = await api.post('/customers/customers/', data)
+      const body = res.data ?? res
+      customerForm.id = body.id || res.id
     }
     ElMessage.success('保存成功')
-  } catch (e) { ElMessage.error('保存失败') }
-  finally { savingCustomer.value = false }
+    await loadCustomer()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('保存失败')
+  } finally { savingCustomer.value = false }
 }
 
 // ========== 系统设置 ==========

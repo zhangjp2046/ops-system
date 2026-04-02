@@ -16,19 +16,7 @@
     
     <!-- 概览统计卡片 -->
     <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
-        <div class="stat-card customers" @click="goToAssets">
-          <div class="stat-icon">
-            <el-icon :size="36"><OfficeBuilding /></el-icon>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.overview.total_customers }}</div>
-            <div class="stat-label">客户总数</div>
-          </div>
-        </div>
-      </el-col>
-      
-      <el-col :span="6">
+      <el-col :span="8">
         <div class="stat-card assets" @click="goToAssets">
           <div class="stat-icon">
             <el-icon :size="36"><Box /></el-icon>
@@ -40,7 +28,7 @@
         </div>
       </el-col>
       
-      <el-col :span="6">
+      <el-col :span="8">
         <div class="stat-card online" @click="goToAssets">
           <div class="stat-icon">
             <el-icon :size="36"><CircleCheck /></el-icon>
@@ -53,7 +41,7 @@
         </div>
       </el-col>
       
-      <el-col :span="6">
+      <el-col :span="8">
         <div class="stat-card offline" @click="goToAssets">
           <div class="stat-icon">
             <el-icon :size="36"><CircleClose /></el-icon>
@@ -120,35 +108,26 @@
     
     <!-- 图表区域 -->
     <el-row :gutter="20" class="charts-row">
-      <!-- 资产分布饼图 -->
-      <el-col :span="8">
+      <!-- 资产类型分布 -->
+      <el-col :span="12">
         <el-card class="chart-card">
           <template #header>
-            <span>资产分布</span>
+            <span>资产类型分布</span>
           </template>
           <div ref="typeChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
       
-      <!-- 资产状态分布 -->
-      <el-col :span="8">
+      <!-- 在线/离线状态 -->
+      <el-col :span="12">
         <el-card class="chart-card">
           <template #header>
-            <span>资产状态</span>
+            <span>在线状态</span>
           </template>
           <div ref="statusChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
-      
-      <!-- 客户资产统计 -->
-      <el-col :span="8">
-        <el-card class="chart-card">
-          <template #header>
-            <span>客户资产统计</span>
-          </template>
-          <div ref="customerChartRef" class="chart-container"></div>
-        </el-card>
-      </el-col>
+    </el-row>
     </el-row>
     
     <!-- 详细信息区域 -->
@@ -266,7 +245,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { 
-  OfficeBuilding, Box, CircleCheck, CircleClose, 
+  Box, CircleCheck, CircleClose, 
   Warning, Monitor, DocumentChecked, Timer, Refresh 
 } from '@element-plus/icons-vue'
 import { 
@@ -284,7 +263,6 @@ const lastCheckTime = ref(null)
 // 统计数据
 const stats = reactive({
   overview: {
-    total_customers: 0,
     total_assets: 0,
     active_assets: 0,
     online_assets: 0,
@@ -327,11 +305,9 @@ const offlinePercentage = computed(() => {
 // 图表引用
 const typeChartRef = ref(null)
 const statusChartRef = ref(null)
-const customerChartRef = ref(null)
 
 let typeChart = null
 let statusChart = null
-let customerChart = null
 
 // 加载所有数据
 async function loadAllData() {
@@ -354,7 +330,6 @@ async function loadDashboardStats() {
       Object.assign(stats.overview, res.data.overview || {})
       stats.type_distribution = res.data.type_distribution
       stats.status_distribution = res.data.status_distribution
-      stats.customer_distribution = res.data.customer_distribution
       
       // 更新最后检查时间
       if (res.data.overview?.last_check_time) {
@@ -464,48 +439,25 @@ function initCharts() {
     })
   }
   
-  // 资产状态分布图
-  if (statusChartRef.value && stats.status_distribution?.length) {
+  // 在线/离线分布图
+  if (statusChartRef.value) {
     if (!statusChart) {
       statusChart = echarts.init(statusChartRef.value)
     }
-    const statusData = stats.status_distribution.map(item => ({
-      name: getStatusText(item.status),
-      value: item.count
-    }))
     statusChart.setOption({
       tooltip: { trigger: 'item' },
+      legend: { bottom: 10 },
       series: [{
         type: 'pie',
         radius: ['40%', '70%'],
         avoidLabelOverlap: false,
         itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 },
-        label: { show: true, formatter: '{b}: {c}' },
-        data: statusData,
-        color: ['#67c23a', '#909399', '#e6a23c', '#f56c6c']
-      }]
-    })
-  }
-  
-  // 客户资产分布图
-  if (customerChartRef.value && stats.customer_distribution?.length) {
-    if (!customerChart) {
-      customerChart = echarts.init(customerChartRef.value)
-    }
-    const customerData = stats.customer_distribution.map(item => ({
-      name: item.customer__customer_name,
-      value: item.count
-    }))
-    customerChart.setOption({
-      tooltip: { trigger: 'item' },
-      series: [{
-        type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 },
-        label: { show: true, formatter: '{b}: {c}' },
-        data: customerData,
-        color: ['#409eff', '#67c23a']
+        label: { show: true, formatter: '{b}: {c} ({d}%)' },
+        data: [
+          { name: '在线', value: stats.overview.online_assets || 0 },
+          { name: '离线', value: stats.overview.offline_assets || 0 },
+        ],
+        color: ['#67c23a', '#f56c6c']
       }]
     })
   }
@@ -595,7 +547,6 @@ function formatTime(time) {
 function handleResize() {
   typeChart?.resize()
   statusChart?.resize()
-  customerChart?.resize()
 }
 
 let refreshInterval = null
@@ -612,7 +563,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   typeChart?.dispose()
   statusChart?.dispose()
-  customerChart?.dispose()
 })
 </script>
 
@@ -680,7 +630,6 @@ onUnmounted(() => {
   color: white;
 }
 
-.stat-card.customers .stat-icon { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 .stat-card.assets .stat-icon { background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%); }
 .stat-card.online .stat-icon { background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%); }
 .stat-card.offline .stat-icon { background: linear-gradient(135deg, #f56c6c 0%, #f78989 100%); }
