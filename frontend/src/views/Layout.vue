@@ -19,11 +19,6 @@
           <template #title>仪表盘</template>
         </el-menu-item>
         
-        <el-menu-item index="/customers">
-          <el-icon><OfficeBuilding /></el-icon>
-          <template #title>客户管理</template>
-        </el-menu-item>
-        
         <el-menu-item index="/assets">
           <el-icon><Box /></el-icon>
           <template #title>资产管理</template>

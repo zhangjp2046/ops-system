@@ -22,12 +22,6 @@ const routes = [
         meta: { title: '仪表盘', icon: 'Odometer' }
       },
       {
-        path: 'customers',
-        name: 'Customers',
-        component: () => import('@/views/customers/CustomerList.vue'),
-        meta: { title: '客户管理', icon: 'OfficeBuilding' }
-      },
-      {
         path: 'assets',
         name: 'Assets',
         component: () => import('@/views/assets/AssetList.vue'),
