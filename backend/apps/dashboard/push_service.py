@@ -364,9 +364,9 @@ def test_push():
     if not api_key:
         return {'success': False, 'message': '未配置API Key'}
 
-    full_url = f'{url.rstrip("/")}/api/receive/health/'
     try:
-        resp = requests.get(full_url, headers={'X-API-Key': api_key}, timeout=timeout)
+        session = get_http_session()
+        resp = session.get(full_url, headers={"X-API-Key": api_key}, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             # 测试成功也记录一条心跳
@@ -497,16 +497,27 @@ def push_inspection_result(task):
         overall = 'pass'
         status_icon = '🟢'
 
-    summary_lines = [
-        f'{status_icon} **{plan_name}** — {pass_count}通过, {warning_count}警告, {fail_count}异常',
-        f'',
-        f'| 检查项 | 状态 | 结果 | 说明 |',
-        f'|--------|------|------|------|',
-    ]
-    for r in results:
-        icon = '✅' if r['status'] == 'pass' else ('⚠️' if r['status'] == 'warning' else '❌')
-        msg_short = (r['result_message'] or '')[:60]
-        summary_lines.append(f'| {r["check_item"]} | {icon} | {r["result_value"]} | {msg_short} |')
+    # 结构化摘要（替代 Markdown 表格，便于机器解析）
+    summary_struct = {
+        'plan_name': plan_name,
+        'protocol': protocol,
+        'pass': pass_count,
+        'warning': warning_count,
+        'fail': fail_count,
+        'total': len(results),
+        'overall': overall,
+        'executed_at': exec_time_str,
+        'items': [
+            {
+                'check_item': rr['check_item'],
+                'status': rr['status'],
+                'result_value': rr['result_value'],
+                'result_message': rr['result_message'],
+            }
+            for rr in results
+        ],
+    }
+
 
     # 推送巡检记录
     inspection_data = {
@@ -521,7 +532,7 @@ def push_inspection_result(task):
             'warning_checks': warning_count,
             'fail_checks': fail_count,
             'overall_status': overall,
-            'summary': '\n'.join(summary_lines),
+            'summary': summary_struct,
             'executed_at': exec_time.isoformat(),
             'results': results,
         }]
