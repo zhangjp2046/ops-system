@@ -1,25 +1,32 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, pagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+
+class RestFrameworkPageNumberPagination(pagination.PageNumberPagination):
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 from django.utils import timezone
 from datetime import datetime, timedelta
 import subprocess
 
-from .models import InspectionPlan, InspectionTask, InspectionResult, InspectionRecord
+from .models import InspectionPlan, InspectionTask, InspectionResult, InspectionRecord, Inspection
 from .serializers import (
     InspectionPlanSerializer, InspectionTaskSerializer,
     InspectionResultSerializer, InspectionRecordSerializer,
-    InspectionRecordDetailSerializer
+    InspectionRecordDetailSerializer, InspectionSerializer
 )
 from .check_items import get_check_items_by_protocol, get_all_protocols, get_protocol_categories
 
 
+
+
 class InspectionPlanViewSet(viewsets.ModelViewSet):
-    """巡检计划视图集"""
-    
+    """巡检计划视图集 - 定义巡检模板和关联资产"""
+
     queryset = InspectionPlan.objects.all()
     serializer_class = InspectionPlanSerializer
-    
+
     def get_queryset(self):
         queryset = super().get_queryset()
         status_filter = self.request.query_params.get('status')
@@ -32,15 +39,22 @@ class InspectionPlanViewSet(viewsets.ModelViewSet):
         if protocol_filter:
             queryset = queryset.filter(protocol=protocol_filter)
         return queryset
-    
+
     @action(detail=False, methods=['get'])
+    def perform_destroy(self, instance):
+        """删除前先解除调度计划的关联，避免外键约束"""
+        from apps.scheduler_v2.models import Plan
+        # 先把关联的调度计划指向 null，再删除巡检计划
+        Plan.objects.filter(inspection_plan=instance).update(inspection_plan=None, inspection_plan_name=None)
+        instance.delete()
+
     def protocols(self, request):
         """获取所有巡检协议分类"""
         return Response({
             'success': True,
             'data': get_all_protocols()
         })
-    
+
     @action(detail=False, methods=['get'])
     def categories(self, request):
         """获取协议分类（按数据库/设备/网络分组）"""
@@ -48,45 +62,115 @@ class InspectionPlanViewSet(viewsets.ModelViewSet):
             'success': True,
             'data': get_protocol_categories()
         })
-    
+
     @action(detail=False, methods=['get'])
     def check_items(self, request):
         """获取指定协议的巡检项目"""
         protocol = request.query_params.get('protocol', '')
         if not protocol:
-            return Response({
-                'success': False,
-                'message': '请指定协议类型'
-            }, status=400)
+            return Response({'success': False, 'message': '请指定协议类型'}, status=400)
         items = get_check_items_by_protocol(protocol)
+        return Response({'success': True, 'data': items})
+
+    @action(detail=False, methods=['get'])
+    def assets_by_protocol(self, request):
+        """获取某协议下的资产，按设备类型分组，方便创建计划时选择"""
+        protocol = request.query_params.get('protocol', '')
+        if not protocol:
+            return Response({'success': False, 'error': '请指定协议'}, status=400)
+        
+        from apps.assets.models import Asset, AssetType
+        
+        # 查询该协议的资产
+        matched = Asset.objects.filter(protocol=protocol, status__in=['ACTIVE', 'ONLINE'])
+        
+        # 按 asset_type 分组
+        from collections import defaultdict
+        type_groups = defaultdict(list)
+        for asset in matched.select_related('asset_type'):
+            at = asset.asset_type
+            type_groups[at.id].append({
+                'id': asset.id,
+                'name': asset.asset_name,
+                'ip': asset.ip_address or '',
+                'asset_code': asset.asset_code,
+            })
+        
+        # 构建返回
+        groups = []
+        for type_id, assets in type_groups.items():
+            try:
+                at_obj = AssetType.objects.get(id=type_id)
+                type_name = at_obj.type_name
+            except AssetType.DoesNotExist:
+                type_name = '未知类型'
+            groups.append({
+                'type_id': type_id,
+                'type_name': type_name,
+                'asset_count': len(assets),
+                'assets': assets,
+            })
+        
+        # 按数量排序
+        groups.sort(key=lambda g: g['asset_count'], reverse=True)
+        
         return Response({
             'success': True,
-            'data': items
+            'data': {
+                'protocol': protocol,
+                'total_assets': sum(g['asset_count'] for g in groups),
+                'type_groups': groups,
+            }
         })
-    
+
+    @action(detail=True, methods=['post'])
+    def execute(self, request, pk=None):
+        """执行巡检计划（遍历所有关联任务）"""
+        from apps.skills.inspection import InspectionSkill
+        skill = InspectionSkill()
+        result = skill.execute(
+            config={'inspection_plan_id': int(pk)},
+            context={'triggered_by': 'manual', 'customer_id': None}
+        )
+        return Response({
+            'success': result.success,
+            'message': result.error or f"执行完成，共巡检 {result.data.get('inspected', 0)} 个资产",
+            'data': result.data
+        })
+
+    def perform_destroy(self, instance):
+        """删除前清除所有关联数据（跨多个legacy表的外键约束）"""
+        from django.db import connection
+        with connection.cursor() as c:
+            # 1. scheduler_task_instances → scheduler_plan_executions → scheduler_plans
+            c.execute("""
+                DELETE ti FROM scheduler_task_instances ti
+                INNER JOIN scheduler_plan_executions pe ON ti.plan_execution_id = pe.id
+                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
+                WHERE sp.inspection_plan_id = %s
+            """, [instance.id])
+            # 2. scheduler_plan_executions → scheduler_plans
+            c.execute("""
+                DELETE pe FROM scheduler_plan_executions pe
+                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
+                WHERE sp.inspection_plan_id = %s
+            """, [instance.id])
+            # 3. scheduler_plans（引用 inspection_plans）
+            c.execute("DELETE FROM scheduler_plans WHERE inspection_plan_id = %s", [instance.id])
+            # 4. inspection_tasks（引用 inspection_plans，plan_id 为 NOT NULL，只能删除）
+            c.execute("DELETE FROM inspection_tasks WHERE plan_id = %s", [instance.id])
+            # 5. 最后删 inspection_plans 本身
+        instance.delete()
+
     def perform_create(self, serializer):
-        """创建时自动设置默认巡检项目"""
+        """创建时自动设置默认巡检项目和时间"""
+        validated = serializer.validated_data
+        # 数据库 scheduled_time 不能为 null，设默认值
+        if not validated.get('scheduled_time'):
+            validated['scheduled_time'] = '09:00:00'
+        if not validated.get('cycle'):
+            validated['cycle'] = 'daily'
         instance = serializer.save()
-        # 如果未指定巡检项目，使用该协议的全部默认项目
-        if not instance.check_items:
-            instance.check_items = get_check_items_by_protocol(instance.protocol)
-            instance.save()
-    
-    @action(detail=True, methods=['post'])
-    def activate(self, request, pk=None):
-        """启用巡检计划"""
-        plan = self.get_object()
-        plan.status = 'active'
-        plan.save()
-        return Response({'success': True, 'message': '巡检计划已启用'})
-    
-    @action(detail=True, methods=['post'])
-    def pause(self, request, pk=None):
-        """暂停巡检计划"""
-        plan = self.get_object()
-        plan.status = 'paused'
-        plan.save()
-        return Response({'success': True, 'message': '巡检计划已暂停'})
 
 
 class InspectionTaskViewSet(viewsets.ModelViewSet):
@@ -167,25 +251,45 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         InspectionResult.objects.filter(task=task).delete()
         InspectionRecord.objects.filter(task=task).delete()
         
-        # 保存结果
+        # 保存结果，同时计算严重程度
+        from apps.alerts.alert_generator import get_threshold_severity
         for r in results:
+            # 从阈值配置计算严重程度
+            sev, sev_name, found = get_threshold_severity(
+                r['check_item_code'],
+                r.get('result_value', ''),
+                customer_id=task.asset.customer_id,
+                asset_type_id=task.asset.asset_type_id
+            )
+            # 如果没有找到阈值配置，使用status映射到severity
+            if not found:
+                sev = {'pass': 1, 'skip': 1, 'warning': 2, 'fail': 3}.get(r['status'], 1)
+
             InspectionResult.objects.create(
                 task=task, asset=task.asset,
                 check_item=r['check_item'], check_item_code=r['check_item_code'],
-                status=r['status'], result_value=r.get('result_value', ''),
+                status=r['status'], severity=sev,
+                result_value=r.get('result_value', ''),
                 result_message=r.get('result_message', ''), suggestion=r.get('suggestion', '')
             )
-        
+
+        # 基于severity计算总体状态（阈值可控制哪些情况算不合格）
+        # severity: 1=信息(通过) 2=警告 3=错误 4=严重(不合格)
+        pass_count = sum(1 for r in results if r['status'] == 'pass')
         pass_count = sum(1 for r in results if r['status'] == 'pass')
         warning_count = sum(1 for r in results if r['status'] == 'warning')
         fail_count = sum(1 for r in results if r['status'] == 'fail')
-        overall = 'fail' if fail_count > 0 else ('warning' if warning_count > 0 else 'pass')
+        # 从数据库重新读取severity判断fail（避免状态不一致）
+        max_severity = InspectionResult.objects.filter(task=task).order_by('-severity').first()
+        max_sev = max_severity.severity if max_severity else 1
+        # 严重程度3=错误/4=严重 都算不合格，只有1=信息/2=警告不算不合格
+        overall = 'fail' if max_sev >= 3 else ('warning' if max_sev == 2 else 'pass')
         
         from django.utils import timezone as tz
         InspectionRecord.objects.create(
             task=task, asset=task.asset,
             total_checks=len(results),
-            pass_checks=pass_count, warning_checks=warning_count, fail_checks=fail_count,
+            pass_checks=pass_count, warning_checks=warning_count, fail_checks=InspectionResult.objects.filter(task=task, severity__gte=3).count(),
             status='completed', overall_status=overall,
             summary=f'{len(results)}项检查: {pass_count}通过, {warning_count}警告, {fail_count}异常',
             executor=request.user if request.user.is_authenticated else None,
@@ -194,7 +298,49 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         
         task.status = 'completed'
         task.save()
-        
+
+        # 同时写入 Inspection 表（兼容前端巡检记录列表）
+        try:
+            from django.utils import timezone as tz_now
+            insp = Inspection.objects.create(
+                name=f'手工巡检-{task.asset.asset_name}',
+                description=f'手动执行巡检计划（任务ID: {task.id}）',
+                inspection_type=protocol.upper(),
+                customer=task.asset.customer,
+                asset=task.asset,
+                asset_type=task.asset.asset_type,
+                status='COMPLETED',
+                total_items=len(results),
+                passed_items=pass_count,
+                warning_items=warning_count,
+                failed_items=fail_count,
+                started_at=task.executed_time,
+                completed_at=tz_now.now(),
+                summary=f'{len(results)}项检查: {pass_count}通过, {warning_count}警告, {fail_count}异常'
+            )
+            # 同时写入 InspectionItem（与 run_inspection 保持一致）
+            from apps.inspection.models import InspectionItem
+            sev_map = {'pass': 'OK', 'warning': 'WARNING', 'fail': 'FAIL', 'skip': 'INFO'}
+            for r in results:
+                try:
+                    InspectionItem.objects.create(
+                        inspection=insp,
+                        item_code=r.get('check_item_code', ''),
+                        item_name=r.get('check_item', ''),
+                        category='snmp',
+                        result=r.get('status', '').upper(),
+                        severity=sev_map.get(r.get('status', ''), 'INFO'),
+                        actual_value=str(r.get('result_value', '')),
+                        expected_value='',
+                        message=r.get('result_message', ''),
+                        details={}
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f'创建 Inspection 记录失败: {e}')
+
         # 根据巡检结果生成告警
         try:
             from apps.alerts.alert_generator import generate_inspection_alerts
@@ -210,7 +356,15 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f'推送巡检结果失败: {e}')
-        
+
+        # 记录监控数据点
+        try:
+            from apps.dashboard.push_service import record_monitoring_data
+            record_monitoring_data(task)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f'记录监控数据失败: {e}')
+
         return Response({
             'success': True,
             'message': f'巡检完成: {pass_count}通过, {warning_count}警告, {fail_count}异常',
@@ -447,8 +601,22 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         
         codes = [item.get('code') if isinstance(item, dict) else item for item in check_items]
         results = []
-        community = task.asset.password or 'public'
-        port = int(task.asset.port) if task.asset.port else 161
+        
+        # 从AssetData读取SNMP配置（与monitoring模块一致）
+        def _get_snmp_field(field_code, default=None):
+            try:
+                from apps.assets.models import AssetData
+                data = AssetData.objects.filter(asset=task.asset, field__field_code=field_code).first()
+                if data:
+                    return data.get_value()
+            except Exception:
+                pass
+            return default
+        
+        snmp_port = _get_snmp_field('snmp_port') or 161
+        snmp_community = _get_snmp_field('snmp_community') or 'public'
+        port = int(snmp_port) if snmp_port else 161
+        community = snmp_community
         
         def snmp_get(oid):
             """SNMP GET 单个值"""
@@ -535,128 +703,120 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
         
         # ====== 运行时间 ======
         if 'SYS_UPTIME' in codes:
-            v = snmp_get('1.3.6.1.2.1.1.3.0')  # sysUpTime
+            v = snmp_get('1.3.6.1.2.1.1.3.0')  # sysUpTime (timeticks format)
+            # 解析 timeticks 格式: "123:45:67.89" = days:hours:minutes:seconds.cs，转换为秒
+            uptime_seconds = None
+            if v:
+                try:
+                    parts = v.split(':')
+                    if len(parts) == 4:
+                        days, hours, minutes, seconds = parts
+                        uptime_seconds = int(days) * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                    elif len(parts) == 2:  # 可能是另一种格式
+                        uptime_seconds = float(v)
+                except:
+                    pass
             results.append({
                 'check_item': '运行时间', 'check_item_code': 'SYS_UPTIME',
-                'status': 'pass' if v else 'warning',
-                'result_value': (v or '无数据')[:100],
-                'result_message': f'Uptime: {v}' if v else '无法获取'
+                'status': 'pass' if uptime_seconds and uptime_seconds > 86400 else 'warning',
+                'result_value': str(int(uptime_seconds)) if uptime_seconds else '0',
+                'result_message': f'运行时间: {v}' if v else '无法获取'
             })
         
-        # ====== CPU使用率 (UCD-SNMP-MIB: ssCpuUser + ssCpuSystem) ======
+        # ====== CPU使用率 ======
+        # 优先使用 hrProcessorLoad (HOST-RESOURCES-MIB)
+        #   - Windows Server: 支持 (hrProcessorLoad)
+        #   - Linux (NET-SNMP): 支持 (hrProcessorLoad)
+        #   - 网络设备: 通常支持
+        # 备用 UCD-SNMP ssCpuIdle (仅 Linux)
         if 'CPU_USAGE' in codes:
-            cpu_user = snmp_get('1.3.6.1.4.1.2021.11.9.0')   # ssCpuUser.0
-            cpu_sys = snmp_get('1.3.6.1.4.1.2021.11.10.0')    # ssCpuSystem.0
-            cpu_idle = snmp_get('1.3.6.1.4.1.2021.11.11.0')   # ssCpuIdle.0
-            
-            try:
-                idle = int(cpu_idle) if cpu_idle else None
-                if idle is not None:
+            cpu_done = False
+
+            # 方式1: hrProcessorLoad (通用，所有平台)
+            raw_loads = snmp_walk('1.3.6.1.2.1.25.3.3.1.2')
+            if raw_loads:
+                try:
+                    loads = [int(x) for x in raw_loads if x.isdigit()]
+                    if loads:
+                        avg_load = round(sum(loads) / len(loads), 1)
+                        max_load = max(loads)
+                        usage = avg_load
+                        status = 'pass' if usage < 70 else ('warning' if usage < 90 else 'fail')
+                        results.append({
+                            'check_item': 'CPU使用率', 'check_item_code': 'CPU_USAGE',
+                            'status': status, 'result_value': f'{usage}% (平均), 最高{max_load}%',
+                            'result_message': f'各核负载: {", ".join(str(x) for x in loads[:8])}{'...' if len(loads) > 8 else ''}',
+                            'suggestion': '' if usage < 70 else 'CPU使用率偏高'
+                        })
+                        cpu_done = True
+                except Exception:
+                    pass
+
+            # 方式2: UCD-SNMP (仅 Linux，Windows 跳过)
+            if not cpu_done:
+                cpu_idle = snmp_get('1.3.6.1.4.1.2021.11.11.0')   # ssCpuIdle.0
+                if cpu_idle and cpu_idle.isdigit():
+                    idle = int(cpu_idle)
                     usage = 100 - idle
+                    cpu_user = snmp_get('1.3.6.1.4.1.2021.11.9.0')   # ssCpuUser.0
+                    cpu_sys = snmp_get('1.3.6.1.4.1.2021.11.10.0')  # ssCpuSystem.0
                     status = 'pass' if usage < 70 else ('warning' if usage < 90 else 'fail')
                     results.append({
                         'check_item': 'CPU使用率', 'check_item_code': 'CPU_USAGE',
                         'status': status, 'result_value': f'{usage}%',
-                        'result_message': f'CPU用户:{cpu_user}%, 系统:{cpu_sys}%, 空闲:{cpu_idle}%',
+                        'result_message': f'用户:{cpu_user or "?"}%, 系统:{cpu_sys or "?"}%, 空闲:{idle}%',
                         'suggestion': '' if usage < 70 else 'CPU使用率偏高'
                     })
-                else:
-                    # fallback: hrProcessorLoad (HOST-RESOURCES-MIB)
-                    loads = snmp_walk('1.3.6.1.2.1.25.3.3.1.2')  # hrProcessorLoad
-                    if loads:
-                        max_load = max(int(x) for x in loads if x.isdigit()) if any(x.isdigit() for x in loads) else 0
-                        status = 'pass' if max_load < 70 else ('warning' if max_load < 90 else 'fail')
-                        results.append({
-                            'check_item': 'CPU使用率', 'check_item_code': 'CPU_USAGE',
-                            'status': status, 'result_value': f'{max_load}% (最大核)',
-                            'result_message': f'各核负载: {", ".join(loads[:8])}'
-                        })
-                    else:
-                        results.append({
-                            'check_item': 'CPU使用率', 'check_item_code': 'CPU_USAGE',
-                            'status': 'warning', 'result_value': '无数据',
-                            'result_message': '无法获取CPU使用率，设备可能不支持UCD-SNMP-MIB'
-                        })
-            except Exception as e:
+                    cpu_done = True
+
+            if not cpu_done:
                 results.append({
                     'check_item': 'CPU使用率', 'check_item_code': 'CPU_USAGE',
-                    'status': 'warning', 'result_value': '解析失败',
-                    'result_message': f'cpu_user={cpu_user}, cpu_sys={cpu_sys}, cpu_idle={cpu_idle}, err={e}'
+                    'status': 'warning', 'result_value': '不支持',
+                    'result_message': '该设备SNMP agent不支持CPU使用率采集（建议配置SSH巡检）'
                 })
         
-        # ====== 内存使用率 (HOST-RESOURCES-MIB: hrStorage) ======
+        # ====== 内存使用率 ======
+        # 计算口径: (MemTotal - MemAvailable) / MemTotal
+        # 这与系统监视器和 free -m 一致，准确反映"实际需要干预与否"
+        # 优先使用 UCD-SNMP memTotalReal - memAvailReal（与系统监视器同源）
+        # 备用 hrStorageSize - hrStorageUsed
+        # ====== 内存使用率 ======
+        # SNMP 口径: (MemTotal - MemAvailReal) / MemTotal
+        # MemAvailReal = MemFree (物理内存中完全未使用的部分)
+        # 与系统监视器(含可回收cache) 不同，SNMP 数据会显著偏高，这是正常现象
+        # 如需与系统监视器一致，请使用 SSH 巡检方式
         if 'MEM_USAGE' in codes:
-            # hrStorageType = 1.3.6.1.2.1.25.2.3.1.2, hrStorageDescr = .3, hrStorageSize = .5, hrStorageUsed = .6
-            # hrStorageType = hrStorageRam(1.3.6.1.2.1.25.2.1.2) 表示物理内存
-            storage_table = snmp_walk_table({
-                'type': '1.3.6.1.2.1.25.2.3.1.2',
-                'descr': '1.3.6.1.2.1.25.2.3.1.3',
-                'units': '1.3.6.1.2.1.25.2.3.1.4',
-                'size': '1.3.6.1.2.1.25.2.3.1.5',
-                'used': '1.3.6.1.2.1.25.2.3.1.6',
-            })
-            
-            # 找物理内存行 (hrStorageType 末尾为 .2 = hrStorageRam)
-            ram_found = False
-            for idx, row in storage_table.items():
-                stype = row.get('type', '')
-                if stype.endswith('.2') or 'Physical' in row.get('descr', '') or 'RAM' in row.get('descr', '').upper():
-                    try:
-                        units = int(row.get('units', 1))
-                        size = int(row.get('size', 0))
-                        used = int(row.get('used', 0))
-                        total_kb = size * units / 1024
-                        used_kb = used * units / 1024
-                        pct = round(used / size * 100, 1) if size > 0 else 0
-                        status = 'pass' if pct < 80 else ('warning' if pct < 95 else 'fail')
-                        results.append({
-                            'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
-                            'status': status,
-                            'result_value': f'{pct}% ({used_kb/1024:.0f}MB/{total_kb/1024:.0f}MB)',
-                            'result_message': f'{row.get("descr", "内存")}: 已用{used_kb/1024:.0f}MB / 总计{total_kb/1024:.0f}MB ({pct}%)',
-                            'suggestion': '' if pct < 80 else '内存使用率偏高'
-                        })
-                        ram_found = True
-                        break
-                    except Exception as e:
-                        results.append({
-                            'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
-                            'status': 'warning', 'result_value': '解析失败',
-                            'result_message': f'行数据: {row}, 错误: {e}'
-                        })
-                        ram_found = True
-                        break
-            
-            if not ram_found:
-                # fallback: UCD-SNMP-MIB memTotalReal / memAvailReal
-                mem_total = snmp_get('1.3.6.1.4.1.2021.4.5.0')   # memTotalReal.0 (KB)
-                mem_avail = snmp_get('1.3.6.1.4.1.2021.4.6.0')   # memAvailReal.0 (KB)
+            mem_total = snmp_get('1.3.6.1.4.1.2021.4.5.0')   # memTotalReal.0 (KB)
+            mem_avail = snmp_get('1.3.6.1.4.1.2021.4.6.0')   # memAvailReal.0 (KB)
+
+            memory_ok = False
+            if mem_total and mem_avail:
                 try:
-                    total = int(mem_total) if mem_total else 0
-                    avail = int(mem_avail) if mem_avail else 0
-                    used = total - avail
-                    pct = round(used / total * 100, 1) if total > 0 else 0
-                    if total > 0:
-                        status = 'pass' if pct < 80 else ('warning' if pct < 95 else 'fail')
-                        results.append({
-                            'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
-                            'status': status,
-                            'result_value': f'{pct}% ({used/1024:.0f}MB/{total/1024:.0f}MB)',
-                            'result_message': f'总计:{total/1024:.0f}MB, 可用:{avail/1024:.0f}MB',
-                            'suggestion': '' if pct < 80 else '内存使用率偏高'
-                        })
-                    else:
-                        results.append({
-                            'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
-                            'status': 'warning', 'result_value': '无数据',
-                            'result_message': '设备不支持内存OID'
-                        })
-                except:
+                    total_kb = int(mem_total)
+                    avail_kb = int(mem_avail)
+                    used_kb = total_kb - avail_kb
+                    pct = round(used_kb / total_kb * 100, 1) if total_kb > 0 else 0
+                    status = 'pass' if pct < 80 else ('warning' if pct < 95 else 'fail')
                     results.append({
                         'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
-                        'status': 'warning', 'result_value': '无数据',
-                        'result_message': f'memTotal={mem_total}, memAvail={mem_avail}'
+                        'status': status,
+                        'result_value': f'{pct}% ({used_kb/1024:.0f}MB/{total_kb/1024:.0f}MB)',
+                        'result_message': (
+                            f'物理内存: 已分配{used_kb/1024:.0f}MB / 总计{total_kb/1024:.0f}MB ({pct}%)'
+                        ),
+                        'suggestion': '' if pct < 80 else '内存使用率偏高（SNMP口径：含buffers/cache），如系统监视器正常则无需干预'
                     })
+                    memory_ok = True
+                except Exception:
+                    pass
+
+            if not memory_ok:
+                results.append({
+                    'check_item': '内存使用率', 'check_item_code': 'MEM_USAGE',
+                    'status': 'warning', 'result_value': '不支持',
+                    'result_message': '该设备SNMP agent不支持内存SNMP OID（建议配置SSH巡检以获取准确数据）'
+                })
         
         # ====== 磁盘使用率 (HOST-RESOURCES-MIB: hrStorage) ======
         if 'DISK_USAGE' in codes:
@@ -754,8 +914,8 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
                 results.append({
                     'check_item': '接口状态', 'check_item_code': 'INTERFACE_STATUS',
                     'status': 'pass' if down_count == 0 else 'warning',
-                    'result_value': f'{up_count}UP/{down_count}DOWN',
-                    'result_message': '\n'.join(details[:15])
+                    'result_value': str(down_count),  # 用 DOWN 数量作为阈值判断依据
+                    'result_message': f'{up_count}UP / {down_count}DOWN\n' + '\n'.join(details[:15])
                 })
             else:
                 results.append({
@@ -950,7 +1110,48 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
 
             # 刷新 task 对象（run_inspection 内部已更新状态）
             task.refresh_from_db()
-            
+
+            # 同时写入 Inspection 表（兼容前端巡检记录列表）
+            try:
+                from django.utils import timezone as tz_now
+                insp = Inspection.objects.create(
+                    name=f'手工巡检-{task.asset.asset_name}',
+                    description=f'手动执行巡检计划（任务ID: {task.id}）',
+                    inspection_type=task.plan.protocol.upper() if task.plan else 'DATABASE',
+                    customer=task.asset.customer,
+                    asset=task.asset,
+                    asset_type=task.asset.asset_type or '',
+                    status='COMPLETED',
+                    total_items=record.total_checks,
+                    passed_items=record.pass_checks,
+                    warning_items=record.warning_checks,
+                    failed_items=record.fail_checks,
+                    started_at=task.executed_time,
+                    completed_at=tz_now.now(),
+                    summary=record.summary
+                )
+                # 写入 InspectionItem
+                from apps.inspection.models import InspectionItem
+                for ir in InspectionResult.objects.filter(task=task):
+                    try:
+                        InspectionItem.objects.create(
+                            inspection=insp,
+                            item_code=ir.check_item_code or '',
+                            item_name=ir.check_item or '',
+                            category='database',
+                            result=ir.status.upper() if ir.status else 'PASS',
+                            severity=ir.get_severity_display() if hasattr(ir, 'get_severity_display') else 'INFO',
+                            actual_value=str(ir.result_value or ''),
+                            expected_value=str(ir.expected_value or ''),
+                            message=str(ir.result_message or ''),
+                            details={}
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f'创建 Inspection 记录失败: {e}')
+
             # 根据巡检结果生成告警
             try:
                 from apps.alerts.alert_generator import generate_inspection_alerts
@@ -966,6 +1167,14 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f'推送巡检结果失败: {e}')
+
+            # 记录监控数据点
+            try:
+                from apps.dashboard.push_service import record_monitoring_data
+                record_monitoring_data(task)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f'记录监控数据失败: {e}')
 
             return Response({
                 'success': True,
@@ -1009,48 +1218,19 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=500)
 
 
-class InspectionRecordViewSet(viewsets.ReadOnlyModelViewSet):
-    """巡检记录视图集（只读）"""
+class InspectionViewSet(viewsets.ModelViewSet):
+    """巡检执行记录视图集（读 Inspection 表，items 兼容 InspectionResult）"""
     
-    queryset = InspectionRecord.objects.all()
-    serializer_class = InspectionRecordSerializer
+    queryset = Inspection.objects.select_related('customer', 'asset').prefetch_related('items').all().order_by('-created_at')
+    serializer_class = InspectionSerializer
+    filterset_fields = ['status', 'inspection_type']
+    pagination_class = RestFrameworkPageNumberPagination
     
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        asset_id = self.request.query_params.get('asset')
-        if asset_id:
-            queryset = queryset.filter(asset_id=asset_id)
-        overall_status = self.request.query_params.get('overall_status')
-        if overall_status:
-            queryset = queryset.filter(overall_status=overall_status)
-        return queryset
-    
-    def retrieve(self, request, *args, **kwargs):
-        """获取巡检记录详情"""
-        instance = self.get_object()
-        serializer = InspectionRecordDetailSerializer(instance)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def statistics(self, request):
-        """巡检统计"""
-        today = timezone.now().date()
-        week_ago = today - timedelta(days=7)
-        
-        total_records = self.queryset.count()
-        today_records = self.queryset.filter(created_at__date=today).count()
-        week_records = self.queryset.filter(created_at__date__gte=week_ago).count()
-        
-        pass_count = self.queryset.filter(overall_status='pass').count()
-        warning_count = self.queryset.filter(overall_status='warning').count()
-        fail_count = self.queryset.filter(overall_status='fail').count()
-        
-        return Response({
-            'total_records': total_records,
-            'today_records': today_records,
-            'week_records': week_records,
-            'pass_count': pass_count,
-            'warning_count': warning_count,
-            'fail_count': fail_count,
-            'pass_rate': round(pass_count / total_records * 100, 2) if total_records > 0 else 0
-        })
+    @action(detail=False, methods=['post'], url_path='batch-delete')
+    def batch_delete(self, request):
+        """批量删除巡检记录"""
+        ids = request.data.get('ids', [])
+        if not ids:
+            return Response({'error': '请提供要删除的ID列表'}, status=400)
+        deleted, _ = Inspection.objects.filter(id__in=ids).delete()
+        return Response({'deleted': deleted})
