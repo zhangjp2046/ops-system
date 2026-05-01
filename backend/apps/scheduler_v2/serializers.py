@@ -157,24 +157,39 @@ class PlanCreateSerializer(serializers.ModelSerializer):
 
 class PlanUpdateSerializer(serializers.ModelSerializer):
     """计划更新序列化器"""
-    # 前端字段(不作为model字段)
+    # 前端字段（不作为model字段）
     schedule_type = serializers.CharField(required=False, allow_blank=True, write_only=True)
     daily_time = serializers.CharField(required=False, allow_blank=True, write_only=True)
     weekday = serializers.IntegerField(required=False, default=0, write_only=True)
     day_of_month = serializers.IntegerField(required=False, default=1, write_only=True)
     interval_value = serializers.IntegerField(required=False, default=1, write_only=True)
     interval_unit = serializers.CharField(required=False, default='hours', write_only=True)
+    # 只读字段（更新时返回完整信息）
+    id = serializers.IntegerField(read_only=True)
+    next_run_time = serializers.DateTimeField(read_only=True)
+    last_run_time = serializers.DateTimeField(read_only=True)
+    total_executions = serializers.IntegerField(read_only=True)
+    success_count = serializers.IntegerField(read_only=True)
+    failure_count = serializers.IntegerField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+    schedule_info = serializers.SerializerMethodField(read_only=True)
+    task_count = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Plan
         fields = [
-            'name', 'description', 'plan_type', 'status',
+            'id', 'name', 'description', 'plan_type', 'status',
             'inspection_plan', 'inspection_plan_name',
             'trigger_mode', 'cron_expression', 'interval_seconds',
             'is_enabled', 'max_concurrent', 'timeout_seconds',
             # 前端字段
             'schedule_type', 'daily_time', 'weekday', 'day_of_month',
-            'interval_value', 'interval_unit'
+            'interval_value', 'interval_unit',
+            # 只读字段
+            'next_run_time', 'last_run_time', 'total_executions',
+            'success_count', 'failure_count', 'created_at', 'updated_at',
+            'schedule_info', 'task_count'
         ]
 
     def update(self, instance, validated_data):
@@ -194,6 +209,40 @@ class PlanUpdateSerializer(serializers.ModelSerializer):
             validated_data['interval_seconds'] = cron[1]
 
         return super().update(instance, validated_data)
+
+    def get_schedule_info(self, obj):
+        """从 cron_expression 和 interval_seconds 解析出调度信息"""
+        if obj.interval_seconds:
+            if obj.interval_seconds >= 3600:
+                return {'schedule_type': 'interval', 'interval_value': obj.interval_seconds // 3600, 'interval_unit': 'hours'}
+            else:
+                return {'schedule_type': 'interval', 'interval_value': obj.interval_seconds // 60, 'interval_unit': 'minutes'}
+        cron = obj.cron_expression or ''
+        parts = cron.split()
+        if len(parts) >= 5:
+            minute, hour, day, month, weekday = parts[0], parts[1], parts[2], parts[3], parts[4]
+            try:
+                utc_hour = int(hour)
+                beijing_hour = (utc_hour + 8) % 24
+                daily_time = f"{beijing_hour:02d}:{minute.zfill(2)}"
+            except:
+                daily_time = f"{hour}:{minute}"
+            if day == '*' and month == '*' and weekday != '*':
+                try:
+                    return {'schedule_type': 'weekly', 'weekday': int(weekday), 'daily_time': daily_time}
+                except:
+                    pass
+            elif day != '*' and month == '*':
+                try:
+                    return {'schedule_type': 'monthly', 'day_of_month': int(day), 'daily_time': daily_time}
+                except:
+                    pass
+            elif day == '*' and month == '*' and weekday == '*':
+                return {'schedule_type': 'daily', 'daily_time': daily_time}
+        return None
+
+    def get_task_count(self, obj):
+        return obj.tasks.count()
 
 
 class TaskInstanceSerializer(serializers.ModelSerializer):
