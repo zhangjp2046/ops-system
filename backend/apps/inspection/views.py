@@ -141,26 +141,52 @@ class InspectionPlanViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         """删除前清除所有关联数据（跨多个legacy表的外键约束）"""
         from django.db import connection
+        plan_id = instance.id
         with connection.cursor() as c:
-            # 1. scheduler_task_instances → scheduler_plan_executions → scheduler_plans
+            # 按依赖顺序从叶子到根清理:
+            # 1. scheduler_plan_tasks → scheduler_plans
             c.execute("""
-                DELETE ti FROM scheduler_task_instances ti
-                INNER JOIN scheduler_plan_executions pe ON ti.plan_execution_id = pe.id
-                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
+                DELETE spt FROM scheduler_plan_tasks spt
+                INNER JOIN scheduler_plans sp ON spt.plan_id = sp.id
                 WHERE sp.inspection_plan_id = %s
-            """, [instance.id])
+            """, [plan_id])
             # 2. scheduler_plan_executions → scheduler_plans
             c.execute("""
                 DELETE pe FROM scheduler_plan_executions pe
                 INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
                 WHERE sp.inspection_plan_id = %s
-            """, [instance.id])
-            # 3. scheduler_plans（引用 inspection_plans）
-            c.execute("DELETE FROM scheduler_plans WHERE inspection_plan_id = %s", [instance.id])
-            # 4. inspection_tasks（引用 inspection_plans，plan_id 为 NOT NULL，只能删除）
-            c.execute("DELETE FROM inspection_tasks WHERE plan_id = %s", [instance.id])
-            # 5. 最后删 inspection_plans 本身
-        instance.delete()
+            """, [plan_id])
+            # 3. scheduler_task_instances → scheduler_plan_executions → scheduler_plans
+            c.execute("""
+                DELETE ti FROM scheduler_task_instances ti
+                INNER JOIN scheduler_plan_executions pe ON ti.plan_execution_id = pe.id
+                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
+                WHERE sp.inspection_plan_id = %s
+            """, [plan_id])
+            # 4. scheduler_plans → inspection_plans
+            c.execute("DELETE FROM scheduler_plans WHERE inspection_plan_id = %s", [plan_id])
+            # 5. inspection_tasks 的子表（先删叶子，因为它们 FK 指向 inspection_tasks）
+            c.execute("""
+                DELETE ir FROM inspection_records ir
+                INNER JOIN inspection_tasks it ON ir.task_id = it.id
+                WHERE it.plan_id = %s
+            """, [plan_id])
+            c.execute("""
+                DELETE ir2 FROM inspection_results ir2
+                INNER JOIN inspection_tasks it ON ir2.task_id = it.id
+                WHERE it.plan_id = %s
+            """, [plan_id])
+            c.execute("""
+                DELETE mdp FROM monitoring_data_points mdp
+                INNER JOIN inspection_tasks it ON mdp.inspection_task_id = it.id
+                WHERE it.plan_id = %s
+            """, [plan_id])
+            # 6. inspection_tasks（plan_id NOT NULL）
+            c.execute("DELETE FROM inspection_tasks WHERE plan_id = %s", [plan_id])
+            # 7. scheduler_v2_plans → inspection_plans（如果有）
+            c.execute("DELETE FROM scheduler_v2_plans WHERE inspection_plan_id = %s", [plan_id])
+            # 8. inspection_plans 本身（直接 SQL，绕过 Django Collector）
+            c.execute("DELETE FROM inspection_plans WHERE id = %s", [plan_id])
 
     def perform_create(self, serializer):
         """创建时自动设置默认巡检项目和时间"""
