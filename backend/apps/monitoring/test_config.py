@@ -17,6 +17,7 @@ class MonitorTestConfig(models.Model):
         ('postgresql', 'PostgreSQL'),
         ('mssql', 'MSSQL'),
         ('oracle', 'Oracle'),
+        ('ntp', 'NTP时间同步'),
     ]
     
     # 基本信息

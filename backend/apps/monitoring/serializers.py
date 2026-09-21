@@ -113,6 +113,34 @@ class MonitorTestConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'last_test_status', 'last_test_time', 'created_at', 'updated_at']
 
 
+class MonitoringDataPointSerializer(serializers.ModelSerializer):
+    """监控数据点序列化器"""
+
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    asset_ip = serializers.CharField(source='asset.ip_address', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    severity_display = serializers.CharField(source='get_severity_display', read_only=True)
+    protocol_display = serializers.CharField(source='get_protocol_display', read_only=True)
+
+    class Meta:
+        from .models import MonitoringDataPoint
+        model = MonitoringDataPoint
+        fields = [
+            'id',
+            'customer', 'customer_name',
+            'asset', 'asset_name', 'asset_ip',
+            'inspection_task',
+            'check_item_code', 'check_item_name',
+            'protocol', 'protocol_display',
+            'numeric_value', 'display_value',
+            'severity', 'severity_display',
+            'warning_threshold', 'error_threshold',
+            'result_message', 'suggestion',
+            'recorded_at', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
 class MonitorTestResultSerializer(serializers.ModelSerializer):
     """监控测试结果序列化器"""
     

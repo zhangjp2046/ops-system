@@ -19,106 +19,113 @@ from .test_config import MonitorTestConfig, MonitorTestResult
 from .serializers import MonitorTestConfigSerializer, MonitorTestResultSerializer
 
 
-class MSSQLHandler:
-    """MSSQL连接处理器 - 使用FreeTDS tsql（解决TLS兼容问题）"""
-    def __init__(self, host, port=1433, username='', password='', database='',
-                 timeout=10, encrypt=False, trust_server_certificate=False):
-        self.host = host
-        self.port = port
-        self.username = username
-        self.password = password
-        self.database = database or 'master'
-        self.timeout = timeout
-
-    def test_connect(self):
-        """使用 FreeTDS tsql 测试 MSSQL 连接"""
-        import subprocess
-        import os
-        import time
-
-        start_time = time.time()
-
-        try:
-            # 配置 FreeTDS
-            conf_path = '/tmp/freetds.conf'
-            if not os.path.exists(conf_path):
-                with open(conf_path, 'w') as f:
-                    f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
-
-            cmd = (f'TDSVER=7.4 tsql -H {self.host} -p {self.port} '
-                   f'-U {self.username} -P "{self.password}" '
-                   f'-D {self.database}')
-
-            proc = subprocess.Popen(
-                cmd, shell=True, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                env={**os.environ, 'FREETDSCONF': conf_path}
-            )
-            stdout, stderr = proc.communicate(input='SELECT @@VERSION AS v\nGO\n', timeout=self.timeout + 5)
-
-            response_time = (time.time() - start_time) * 1000
-
-            if 'Microsoft SQL Server' in stdout:
-                version = ''
-                for line in stdout.split('\n'):
-                    if 'Microsoft SQL Server' in line:
-                        import re
-                        version = re.sub(r'(?:\d+>\s*)+', '', line.strip())
-                        break
-                return {
-                    'success': True,
-                    'message': 'FreeTDS tsql 连接成功',
-                    'response_time': round(response_time, 2),
-                    'data': {
-                        'version': version[:100],
-                        'driver': 'FreeTDS tsql',
-                        'method': 'tsql'
-                    }
-                }
-            elif 'Msg 18456' in stdout or 'Login failed' in stdout:
-                return {
-                    'success': False,
-                    'error': '登录失败，请检查用户名密码',
-                    'response_time': round(response_time, 2)
-                }
-            else:
-                return {
-                    'success': False,
-                    'error': f'MSSQL连接失败: {stderr[:200] if stderr else stdout[:200]}',
-                    'response_time': round(response_time, 2)
-                }
-
-        except subprocess.TimeoutExpired:
-            return {
-                'success': False,
-                'error': 'MSSQL连接超时',
-                'response_time': (time.time() - start_time) * 1000
-            }
-        except FileNotFoundError:
-            return {
-                'success': False,
-                'error': 'tsql未安装，请执行: sudo apt-get install -y tdsodbc freetds-bin',
-                'response_time': (time.time() - start_time) * 1000
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'MSSQL连接错误: {str(e)}',
-                'response_time': (time.time() - start_time) * 1000
-            }
+# ============================================================
+# MSSQLHandler 已弃用 — 请使用 protocols.py 中的 DatabaseProtocol(db_type='mssql')
+# 参考: get_protocol_handler 中的 mssql 分支
+# ============================================================
+# class MSSQLHandler:
+#     """MSSQL连接处理器 - 使用FreeTDS tsql（解决TLS兼容问题）"""
+#     def __init__(self, host, port=1433, username='', password='', database='',
+#                  timeout=10, encrypt=False, trust_server_certificate=False):
+#         self.host = host
+#         self.port = port
+#         self.username = username
+#         self.password = password
+#         self.database = database or 'master'
+#         self.timeout = timeout
+#
+#     def test_connect(self):
+#         """使用 FreeTDS tsql 测试 MSSQL 连接"""
+#         import subprocess
+#         import os
+#         import time
+#
+#         start_time = time.time()
+#
+#         try:
+#             conf_path = '/tmp/freetds.conf'
+#             if not os.path.exists(conf_path):
+#                 with open(conf_path, 'w') as f:
+#                     f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
+#
+#             cmd = (f'TDSVER=7.4 tsql -H {self.host} -p {self.port} '
+#                    f'-U {self.username} -P "{self.password}" '
+#                    f'-D {self.database}')
+#
+#             proc = subprocess.Popen(
+#                 cmd, shell=True, stdin=subprocess.PIPE,
+#                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+#                 env={**os.environ, 'FREETDSCONF': conf_path}
+#             )
+#             stdout, stderr = proc.communicate(input='SELECT @@VERSION AS v\nGO\n', timeout=self.timeout + 5)
+#
+#             response_time = (time.time() - start_time) * 1000
+#
+#             if 'Microsoft SQL Server' in stdout:
+#                 version = ''
+#                 for line in stdout.split('\n'):
+#                     if 'Microsoft SQL Server' in line:
+#                         import re
+#                         version = re.sub(r'(?:\d+>\s*)+', '', line.strip())
+#                         break
+#                 return {
+#                     'success': True,
+#                     'message': 'FreeTDS tsql 连接成功',
+#                     'response_time': round(response_time, 2),
+#                     'data': {
+#                         'version': version[:100],
+#                         'driver': 'FreeTDS tsql',
+#                         'method': 'tsql'
+#                     }
+#                 }
+#             elif 'Msg 18456' in stdout or 'Login failed' in stdout:
+#                 return {
+#                     'success': False,
+#                     'error': '登录失败，请检查用户名密码',
+#                     'response_time': round(response_time, 2)
+#                 }
+#             else:
+#                 return {
+#                     'success': False,
+#                     'error': f'MSSQL连接失败: {stderr[:200] if stderr else stdout[:200]}',
+#                     'response_time': round(response_time, 2)
+#                 }
+#
+#         except subprocess.TimeoutExpired:
+#             return {
+#                 'success': False,
+#                 'error': 'MSSQL连接超时',
+#                 'response_time': (time.time() - start_time) * 1000
+#             }
+#         except FileNotFoundError:
+#             return {
+#                 'success': False,
+#                 'error': 'tsql未安装，请执行: sudo apt-get install -y tdsodbc freetds-bin',
+#                 'response_time': (time.time() - start_time) * 1000
+#             }
+#         except Exception as e:
+#             return {
+#                 'success': False,
+#                 'error': f'MSSQL连接错误: {str(e)}',
+#                 'response_time': (time.time() - start_time) * 1000
+#             }
 
 
 def get_protocol_handler(protocol, **kwargs):
     """获取协议处理器"""
-    # MSSQL 专用处理器（pyodbc + pymssql 双保险）
-    if protocol == 'mssql':
-        return MSSQLHandler(**kwargs)
-
+    # MSSQL 使用 protocols.py 里的 DatabaseProtocol（全面测试：版本/数据库/配置/状态）
     # 其他协议使用 protocols.py 中的实现
     from .protocols import (
         PingProtocol, PortCheckProtocol, SSHProtocol,
         SNMPProtocol, DatabaseProtocol
     )
+
+    if protocol == 'mssql':
+        kwargs.pop('encrypt', None)
+        kwargs.pop('trust_server_certificate', None)
+        kwargs.setdefault('port', 1433)
+        logger.info(f"MSSQL 测试使用 DatabaseProtocol(db_type='mssql') 替代已弃用的 MSSQLHandler")
+        return DatabaseProtocol(db_type='mssql', **kwargs)
 
     if protocol == 'ping':
         return PingProtocol(**kwargs)
@@ -185,7 +192,7 @@ class MonitorTestConfigViewSet(viewsets.ModelViewSet):
             config=config,
             status=result['status'],
             response_time=result.get('response_time'),
-            error_message=result.get('error', ''),
+            error_message=result.get('error') or '',
             data=result.get('data', {}),
             test_duration=round(test_duration, 2),
             remote_addr=request.META.get('REMOTE_ADDR')
@@ -218,6 +225,7 @@ class MonitorTestConfigViewSet(viewsets.ModelViewSet):
             {'code': 'postgresql', 'name': 'PostgreSQL', 'port': 5432, 'fields': ['port', 'username', 'password', 'database']},
             {'code': 'mssql', 'name': 'MSSQL', 'port': 1433, 'fields': ['port', 'username', 'password', 'database', 'encrypt', 'trust_server_certificate']},
             {'code': 'oracle', 'name': 'Oracle', 'port': 1521, 'fields': ['port', 'username', 'password', 'database']},
+            {'code': 'ntp', 'name': 'NTP时间同步检测', 'port': 123, 'fields': []},
         ]
         return Response(protocols)
 
@@ -250,7 +258,18 @@ class MonitorTestResultViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(created_at__lte=end_date)
         
         return queryset.select_related('config')
-    
+
+    @action(detail=True, methods=['post'])
+    def push(self, request, pk=None):
+        """推送测试结果到 ops-center"""
+        result = self.get_object()
+        from apps.dashboard.push_service import push_monitor_test_result
+        push_result = push_monitor_test_result(result.id)
+        if push_result:
+            return Response({'success': True, 'message': '推送成功', 'result': push_result})
+        else:
+            return Response({'success': False, 'message': '推送失败或未配置'}, status=400)
+
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """测试结果统计"""
@@ -358,14 +377,119 @@ def quick_test(request):
         }
     
     test_duration = (time.time() - start_time) * 1000
-    
-    return Response({
+
+    # 保存测试结果（支持匿名用户）
+    response_data = {
         'protocol': protocol,
         'host': host,
         'port': port,
         'test_duration': round(test_duration, 2),
         **result
-    })
+    }
+
+    try:
+        temp_config, _ = MonitorTestConfig.objects.get_or_create(
+            name=f'快速测试_{protocol}_{host}_{int(time.time())}'[:100],
+            defaults={
+                'customer_id': 1,
+                'protocol': protocol,
+                'host': host,
+                'port': port if port else None,
+                'config': {},
+                'created_by': request.user if request.user.is_authenticated else None,
+                'is_enabled': False,
+            }
+        )
+        # 各协议返回的数据在顶层（不是 result['data']），需按协议提取
+        if protocol == 'ping':
+            data_to_save = {
+                'reachable': result.get('reachable'),
+                'packet_loss': result.get('packet_loss'),
+                'min_rtt': result.get('min_rtt'),
+                'max_rtt': result.get('max_rtt'),
+                'avg_rtt': result.get('avg_rtt'),
+                'output': result.get('output', ''),
+            }
+        elif protocol == 'port':
+            data_to_save = {
+                'open': result.get('open'),
+                'service': result.get('service'),
+                'banner': result.get('banner', ''),
+            }
+        elif protocol == 'ssh':
+            data_to_save = {
+                'authenticated': result.get('authenticated'),
+                'error': result.get('error'),
+            }
+        elif protocol == 'snmp':
+            data_to_save = {
+                'available': result.get('available'),
+                'snmp_version': result.get('snmp_version'),
+                'version_tests': result.get('version_tests', {}),
+                'system_info': result.get('system_info', {}),
+                'device_info': result.get('device_info', {}),
+                'oids': result.get('oids', {}),
+                'raw_outputs': result.get('raw_outputs', {}),
+                'walk_data': result.get('walk_data', {}),
+                'interface_summary': result.get('interface_summary', {}),
+            }
+        elif protocol == 'mysql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'variables': result.get('variables', {}),
+                'databases': result.get('databases', []),
+                'engines': result.get('engines', []),
+                'status': result.get('status', {}),
+                'raw_queries': result.get('raw_queries', {}),
+            }
+        elif protocol == 'mssql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+            }
+        elif protocol == 'postgresql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+            }
+        elif protocol == 'oracle':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'tablespaces': result.get('tablespaces', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+                'response_time': result.get('response_time'),
+                'driver': result.get('driver', ''),
+            }
+        else:
+            data_to_save = result.get('data', {}) if isinstance(result.get('data'), dict) else {}
+
+        test_result = MonitorTestResult.objects.create(
+            config=temp_config,
+            status='success' if result.get('success') else 'failed',
+            response_time=result.get('response_time'),
+            error_message=result.get('error') or '',
+            data=data_to_save,
+            test_duration=round(test_duration, 2),
+            remote_addr=request.META.get('REMOTE_ADDR')
+        )
+        response_data['result_id'] = test_result.id
+    except Exception as e:
+        logger.warning(f'保存快速测试结果失败: {e}')
+
+    return Response(response_data)
 
 
 def execute_protocol_test(config):
@@ -402,13 +526,88 @@ def execute_protocol_test(config):
         result = handler.test_connect()
         
         # 格式化结果，确保 error 字段不为 null
+        # 各协议测试结果的数据字段都在顶层，而非 result['data']，需分别提取
+        data_to_save = {}
+        if config.protocol == 'ping':
+            data_to_save = {
+                'reachable': result.get('reachable'),
+                'packet_loss': result.get('packet_loss'),
+                'min_rtt': result.get('min_rtt'),
+                'max_rtt': result.get('max_rtt'),
+                'avg_rtt': result.get('avg_rtt'),
+                'output': result.get('output', ''),
+            }
+        elif config.protocol == 'port':
+            data_to_save = {
+                'open': result.get('open'),
+                'service': result.get('service'),
+                'banner': result.get('banner', ''),
+            }
+        elif config.protocol == 'ssh':
+            data_to_save = {
+                'authenticated': result.get('authenticated'),
+                'error': result.get('error'),
+            }
+        elif config.protocol == 'snmp':
+            data_to_save = {
+                'available': result.get('available'),
+                'snmp_version': result.get('snmp_version'),
+                'version_tests': result.get('version_tests', {}),
+                'system_info': result.get('system_info', {}),
+                'device_info': result.get('device_info', {}),
+                'oids': result.get('oids', {}),
+                'raw_outputs': result.get('raw_outputs', {}),
+                'walk_data': result.get('walk_data', {}),
+                'interface_summary': result.get('interface_summary', {}),
+            }
+        elif config.protocol == 'mysql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'variables': result.get('variables', {}),
+                'databases': result.get('databases', []),
+                'engines': result.get('engines', []),
+                'status': result.get('status', {}),
+                'raw_queries': result.get('raw_queries', {}),
+            }
+        elif config.protocol == 'mssql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+            }
+        elif config.protocol == 'postgresql':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+            }
+        elif config.protocol == 'oracle':
+            data_to_save = {
+                'version': result.get('version'),
+                'db_info': result.get('db_info', {}),
+                'databases': result.get('databases', []),
+                'tablespaces': result.get('tablespaces', []),
+                'config': result.get('config', {}),
+                'status': result.get('status', {}),
+                'raw_output': result.get('raw_output', ''),
+                'response_time': result.get('response_time'),
+                'driver': result.get('driver', ''),
+            }
+
         formatted_result = {
             'status': 'success' if result.get('success') else 'failed',
             'response_time': result.get('response_time'),
             'error': result.get('error') or '',
-            'data': result.get('data', {}),
+            'data': {k: v for k, v in data_to_save.items() if v is not None and v != {}},
         }
-        
+
         # 对于 MSSQL 错误进行特殊处理
         if config.protocol == 'mssql' and formatted_result['status'] == 'failed':
             error_msg = formatted_result['error']

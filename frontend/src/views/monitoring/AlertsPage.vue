@@ -3,6 +3,9 @@
     <div class="page-header">
       <h2>告警中心</h2>
       <div class="header-actions">
+        <el-button type="danger" @click="handleBatchDelete" :disabled="!selectedIds.size">
+          <el-icon><Delete /></el-icon> 批量删除{{ selectedIds.size ? `(${selectedIds.size})` : '' }}
+        </el-button>
         <el-button type="primary" @click="loadAlerts" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
@@ -80,8 +83,8 @@
 
     <!-- 告警列表 -->
     <el-card class="table-card">
-      <el-table :data="alerts" v-loading="loading" stripe @selection-change="handleSelectionChange">
-        <el-table-column type="selection" width="45" />
+      <el-table :data="alerts" v-loading="loading" stripe row-key="id" @selection-change="handleSelectionChange" @select="handleSelect" @select-all="handleSelectAll">
+        <el-table-column type="selection" width="45" reserve-selection />
         <el-table-column label="严重程度" width="80">
           <template #default="{ row }">
             <el-tag :type="getSeverityType(row.severity)" size="small" effect="dark">
@@ -105,7 +108,7 @@
         <el-table-column label="发生时间" width="160">
           <template #default="{ row }">{{ formatTime(row.occurred_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'NEW'" link type="primary" size="small" @click="ackAlert(row)">
               确认
@@ -115,6 +118,9 @@
             </el-button>
             <el-button link type="info" size="small" @click="showDetail(row)">
               详情
+            </el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -192,7 +198,7 @@ import axios from '@/utils/axios'
 
 const loading = ref(false)
 const alerts = ref([])
-const selectedAlerts = ref([])
+const selectedRows = ref([])
 const detailVisible = ref(false)
 const currentAlert = ref(null)
 const filterStatus = ref('')
@@ -265,6 +271,8 @@ async function loadAlerts() {
 
 function filterByStatus(status) {
   filterStatus.value = status
+  selectedIds.clear()
+  selectedRows.value = []
   pagination.page = 1
   loadAlerts()
 }
@@ -274,12 +282,38 @@ function resetFilters() {
   filters.severity = null
   filters.search = ''
   filterStatus.value = ''
+  selectedIds.clear()
+  selectedRows.value = []
   pagination.page = 1
   loadAlerts()
 }
 
+const selectedIds = reactive(new Set())
+
 function handleSelectionChange(selection) {
-  selectedAlerts.value = selection
+  // selection-change 只包含当前页可见行，不要覆盖
+  // 实际的选中管理由 handleSelect / handleSelectAll 维护
+  selectedRows.value = selection
+}
+
+function handleSelect(selection, row) {
+  if (selection.some(r => r.id === row.id)) {
+    selectedIds.add(row.id)
+  } else {
+    selectedIds.delete(row.id)
+  }
+  selectedRows.value = [...selection]
+}
+
+function handleSelectAll(selection) {
+  if (selection.length > 0) {
+    // 全选当前页
+    alerts.value.forEach(a => selectedIds.add(a.id))
+  } else {
+    // 取消全选当前页
+    alerts.value.forEach(a => selectedIds.delete(a.id))
+  }
+  selectedRows.value = [...selection]
 }
 
 // ========== 操作 ==========
@@ -309,6 +343,42 @@ async function resolveAlert(row) {
 function showDetail(row) {
   currentAlert.value = row
   detailVisible.value = true
+}
+
+async function handleDelete(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除告警「${row.title}」吗？此操作不可恢复。`,
+      '确认删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    await axios.delete(`/api/alerts/alerts/${row.id}/`)
+    ElMessage.success('删除成功')
+    loadAlerts()
+    loadStats()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
+async function handleBatchDelete() {
+  if (!selectedIds.size) return
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedIds.size} 条告警吗？此操作不可恢复。`,
+      '确认批量删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    const ids = [...selectedIds]
+    await axios.post('/api/alerts/alerts/batch-delete/', { ids })
+    ElMessage.success(`已删除 ${ids.length} 条`)
+    selectedIds.clear()
+    selectedRows.value = []
+    loadAlerts()
+    loadStats()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error('批量删除失败')
+  }
 }
 
 // ========== 工具函数 ==========

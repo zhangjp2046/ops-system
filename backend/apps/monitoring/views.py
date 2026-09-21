@@ -2,12 +2,13 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Subquery, OuterRef, Max, F
 
-from .models import MonitoringTask, MonitoringResult, AlertRule, Alert
+from .models import MonitoringTask, MonitoringResult, AlertRule, Alert, MonitoringDataPoint
 from .serializers import (
     MonitoringTaskSerializer, MonitoringResultSerializer,
-    AlertRuleSerializer, AlertSerializer, AlertStatisticsSerializer
+    AlertRuleSerializer, AlertSerializer, AlertStatisticsSerializer,
+    MonitoringDataPointSerializer
 )
 
 
@@ -257,6 +258,151 @@ class AlertViewSet(viewsets.ModelViewSet):
         alerts = Alert.objects.filter(
             status__in=['open', 'acknowledged']
         ).order_by('-occurred_at')[:50]
-        
+
         serializer = self.get_serializer(alerts, many=True)
         return Response(serializer.data)
+
+
+class MonitoringDataViewSet(viewsets.ReadOnlyModelViewSet):
+    """监控数据中心 - 只读视图集"""
+    queryset = MonitoringDataPoint.objects.all()
+    serializer_class = MonitoringDataPointSerializer
+    filter_backends = [filters.OrderingFilter]
+    filterset_class = None  # 使用 get_queryset 里的自定义过滤
+    ordering_fields = ['recorded_at', 'numeric_value', 'severity']
+    ordering = ['-recorded_at']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        asset_id = self.request.query_params.get('asset')
+        check_item_code = self.request.query_params.get('check_item_code')
+        protocol = self.request.query_params.get('protocol')
+        customer_id = self.request.query_params.get('customer')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+
+        if asset_id:
+            queryset = queryset.filter(asset_id=asset_id)
+        if check_item_code:
+            queryset = queryset.filter(check_item_code=check_item_code)
+        if protocol:
+            queryset = queryset.filter(protocol=protocol)
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        if start_date:
+            from django.utils import timezone
+            queryset = queryset.filter(recorded_at__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(recorded_at__lte=end_date)
+
+        return queryset
+
+    @action(detail=False, methods=['get'])
+    def latest(self, request):
+        """每个资产每个指标的最近一条数据"""
+        from django.db.models import Subquery, OuterRef
+
+        latest_ids = MonitoringDataPoint.objects.filter(
+            asset=OuterRef('asset'),
+            check_item_code=OuterRef('check_item_code')
+        ).order_by('-recorded_at').values('id')[:1]
+
+        latest_data = MonitoringDataPoint.objects.filter(
+            id__in=Subquery(latest_ids)
+        ).order_by('asset', 'check_item_code')
+
+        serializer = self.get_serializer(latest_data, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def timeline(self, request):
+        """
+        指标时间线 - 按资产+指标获取时间序列数据
+        query params: asset, check_item_code, days(default 7)
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+
+        asset_id = request.query_params.get('asset')
+        check_item_code = request.query_params.get('check_item_code')
+        days = int(request.query_params.get('days', 7))
+
+        if not asset_id or not check_item_code:
+            return Response({'error': '需要 asset 和 check_item_code 参数'}, status=400)
+
+        start_time = timezone.now() - timedelta(days=days)
+        data = MonitoringDataPoint.objects.filter(
+            asset_id=asset_id,
+            check_item_code=check_item_code,
+            recorded_at__gte=start_time,
+        ).order_by('recorded_at')
+
+        serializer = self.get_serializer(data, many=True)
+        return Response({
+            'asset_id': asset_id,
+            'check_item_code': check_item_code,
+            'days': days,
+            'data': serializer.data,
+        })
+
+    @action(detail=False, methods=['get'])
+    def overview(self, request):
+        """监控概览 - 各指标最新值（每资产每指标只返回一条最新记录）"""
+        from django.db.models import Window
+        from django.db.models.functions import RowNumber as RN
+
+        queryset = MonitoringDataPoint.objects.all()
+
+        # 查询参数过滤
+        protocol = request.query_params.get('protocol')
+        customer_id = request.query_params.get('customer')
+        asset_type = request.query_params.get('asset_type')
+        if protocol:
+            queryset = queryset.filter(protocol=protocol)
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        if asset_type:
+            queryset = queryset.filter(asset__asset_type_id=asset_type)
+
+        # 使用窗口函数：按(asset, check_item_code)分组，取recorded_at最大的那条
+        ranked = queryset.annotate(
+            _rank=Window(
+                expression=RN(),
+                partition_by=['asset_id', 'check_item_code'],
+                order_by=F('recorded_at').desc()
+            )
+        )
+        overview = ranked.filter(_rank=1).select_related('asset', 'customer').order_by('-recorded_at', 'asset__asset_name', 'check_item_code')
+
+        serializer = self.get_serializer(overview, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def by_asset(self, request):
+        """按资产查看所有监控指标"""
+        asset_id = request.query_params.get('asset')
+        if not asset_id:
+            return Response({'error': '需要 asset 参数'}, status=400)
+
+        from django.db.models import Max
+
+        latest_ids = MonitoringDataPoint.objects.filter(
+            asset_id=asset_id,
+            check_item_code=OuterRef('check_item_code'),
+        ).order_by('-recorded_at').values('id')[:1]
+
+        data = MonitoringDataPoint.objects.filter(
+            id__in=Subquery(latest_ids)
+        ).order_by('check_item_code')
+
+        serializer = self.get_serializer(data, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def batch_delete(self, request):
+        """批量删除监控数据点"""
+        ids = request.data.get('ids', [])
+        if not ids:
+            return Response({'error': '需要 ids 参数'}, status=400)
+        count, _ = MonitoringDataPoint.objects.filter(id__in=ids).delete()
+        return Response({'deleted': count})

@@ -2,6 +2,87 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 
 
+class MonitoringDataPoint(models.Model):
+    """
+    监控数据点 - 存储每次巡检的指标值（时间序列数据）
+    由 AlertThreshold.is_monitoring_item=True 的阈值触发，记录每次巡检的指标值
+    """
+
+    PROTOCOL_CHOICES = [
+        ('mysql', 'MySQL'),
+        ('mssql', 'MSSQL'),
+        ('oracle', 'Oracle'),
+        ('postgresql', 'PostgreSQL'),
+        ('snmp', 'SNMP'),
+        ('ssh', 'SSH'),
+        ('ping', 'Ping'),
+        ('port', '端口检测'),
+        ('ntp', 'NTP时间同步'),
+    ]
+
+    SEVERITY_CHOICES = [
+        (1, '信息'),
+        (2, '警告'),
+        (3, '错误'),
+        (4, '严重'),
+    ]
+
+    # 关联
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='monitoring_data', verbose_name='客户',
+        null=True, blank=True
+    )
+    asset = models.ForeignKey(
+        'assets.Asset', on_delete=models.CASCADE,
+        related_name='monitoring_data', verbose_name='资产'
+    )
+    inspection_task = models.ForeignKey(
+        'inspection.InspectionTask', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='data_points',
+        verbose_name='关联巡检任务'
+    )
+
+    # 指标信息
+    check_item_code = models.CharField('检查项编码', max_length=50, db_index=True)
+    check_item_name = models.CharField('检查项名称', max_length=100)
+    protocol = models.CharField('协议类型', max_length=20, choices=PROTOCOL_CHOICES, db_index=True)
+
+    # 值
+    numeric_value = models.FloatField('数值', null=True, blank=True,
+        help_text='解析后的数值，便于排序和绘图')
+    display_value = models.CharField('显示值', max_length=200,
+        help_text='原始展示值，如 "85%"、"1523MB"')
+
+    # 阈值参考（记录当时的阈值状态）
+    severity = models.IntegerField('状态', choices=SEVERITY_CHOICES, default=1)
+    warning_threshold = models.CharField('警告阈值', max_length=50, blank=True, default='')
+    error_threshold = models.CharField('错误阈值', max_length=50, blank=True, default='')
+
+    # 上下文
+    result_message = models.TextField('结果消息', blank=True, default='')
+    suggestion = models.TextField('建议', blank=True, default='')
+
+    # 时间
+    recorded_at = models.DateTimeField('记录时间', db_index=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        db_table = 'monitoring_data_points'
+        verbose_name = '监控数据点'
+        verbose_name_plural = '监控数据点'
+        ordering = ['-recorded_at']
+        indexes = [
+            models.Index(fields=['asset', 'check_item_code', 'recorded_at']),
+            models.Index(fields=['asset', 'protocol', 'recorded_at']),
+            models.Index(fields=['customer', 'recorded_at']),
+            models.Index(fields=['check_item_code', 'recorded_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.asset.asset_name} - {self.check_item_name}: {self.display_value}'
+
+
 class MonitoringTask(models.Model):
     """监控任务模型"""
     
