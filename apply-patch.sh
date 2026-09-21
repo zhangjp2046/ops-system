@@ -129,17 +129,40 @@ fi
 echo -e "${GREEN}  下载完成 ($(du -h "$TAR_PATH" | cut -f1))${NC}"
 
 # ---- 备份 ----
+# 只备份「即将被覆盖」的文件，且保留原相对目录结构（否则各 app 同名的
+# models.py / views.py / urls.py 会互相覆盖）。backend 与 frontend 一起备份。
 BACKUP_DIR="$CACHE_DIR/backup_${LOCAL_VER:-before}"
 mkdir -p "$BACKUP_DIR"
+FRONTEND_DIR="$(cd "$(dirname "$0")/frontend" && pwd 2>/dev/null || echo "")"
 echo -e "${YELLOW}备份当前文件到 $BACKUP_DIR ...${NC}"
-tar -tzf "$TAR_PATH" | grep '^files/backend/' | while read -r f; do
+
+BK_DONE=0
+BK_NEW=0
+while IFS= read -r f; do
     rel="${f#files/}"
-    src="$BACKEND_DIR/$rel"
+    case "$rel" in
+        backend/*)  src="$BACKEND_DIR/${rel#backend/}" ;;
+        frontend/*) if [ -n "$FRONTEND_DIR" ]; then src="$FRONTEND_DIR/${rel#frontend/}"; else continue; fi ;;
+        *)          continue ;;
+    esac
     if [ -f "$src" ]; then
-        cp "$src" "$BACKUP_DIR/" 2>/dev/null || true
-        echo "  备份: $rel"
+        dst="$BACKUP_DIR/$rel"
+        mkdir -p "$(dirname "$dst")"
+        if cp -p "$src" "$dst" 2>/dev/null; then
+            BK_DONE=$((BK_DONE+1))
+        fi
+    else
+        BK_NEW=$((BK_NEW+1))
     fi
-done
+done < <(tar -tzf "$TAR_PATH" | grep -E '^files/(backend|frontend)/' | grep -v '/$')
+
+if [ "$BK_DONE" -eq 0 ]; then
+    echo -e "${RED}  ⚠ 没有任何已有文件被备份（本包可能全是新增文件）${NC}"
+else
+    echo -e "${GREEN}  ✅ 已备份 $BK_DONE 个文件（保留目录结构）${NC}"
+    echo "     位置: $BACKUP_DIR"
+    [ "$BK_NEW" -gt 0 ] && echo "     另有 $BK_NEW 个本地不存在（新增文件，无需备份）"
+fi
 
 # ---- 应用 ----
 echo -e "${YELLOW}正在应用补丁...${NC}"
