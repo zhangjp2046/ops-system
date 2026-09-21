@@ -1,0 +1,1 @@
+default_app_config = 'apps.scheduler_v2.apps.SchedulerV2Config'
