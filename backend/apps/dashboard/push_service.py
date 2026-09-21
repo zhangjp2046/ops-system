@@ -923,17 +923,26 @@ def _deferred_patch_check():
             if not url:
                 return
             import requests
+
+            # 必须先读本地版本并随请求带给中心端：中心端按
+            # needs_update = (not client_version) or client_version != latest 判定，
+            # 不带版本号会因 client_version 为空而恒为 True（永远提示"有新版本"）
+            ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
+            local_ver = ''
+            if os.path.exists(ver_file):
+                try:
+                    local_ver = open(ver_file).read().strip()
+                except Exception:
+                    local_ver = ''
+
             center = f'{url.rstrip("/")}/api/collector/patches/'
-            resp = requests.get(center, timeout=5)
+            params = {'version': local_ver} if local_ver else None
+            resp = requests.get(center, params=params, timeout=5)
             if resp.status_code == 200:
                 meta = resp.json()
-                ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
-                local_ver = ''
-                if os.path.exists(ver_file):
-                    local_ver = open(ver_file).read().strip()
                 if meta.get('needs_update'):
                     logger.warning(
-                        f'发现新补丁: {local_ver} → {meta["latest_version"]}'
+                        f'发现新补丁: {local_ver or "(未安装)"} → {meta["latest_version"]}'
                     )
                     logger.warning(f'更新内容: {meta.get("changelog", [])}')
                     logger.warning(f'请运行: bash apply-patch.sh')

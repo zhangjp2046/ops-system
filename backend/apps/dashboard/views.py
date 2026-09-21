@@ -117,7 +117,13 @@ def _is_push_enabled():
 
 
 def _get_patch_info():
-    """获取本地补丁版本信息，以及是否有新版本"""
+    """获取本地补丁版本信息，以及是否有新版本。
+
+    本地版本以 `~/.openclaw/patches/patch_version.txt` 为唯一准绳（apply-patch.sh 写入）。
+    `patch_check_cache.json` 只是「上次向中心端查询的结果」，仅当其记录的 local_version
+    与本地实际版本一致时才采信；不一致说明缓存已过期（刚应用完补丁、或推送通道故障
+    导致缓存停更），此时丢弃其结论并触发一次后台刷新 —— 否则界面会显示早已过期的版本。
+    """
     import os, json
     info = {
         'local_version': '',
@@ -125,22 +131,42 @@ def _get_patch_info():
         'latest_version': '',
         'changelog': [],
     }
-    # 读取补丁检查缓存（由 push_service._deferred_patch_check 写入）
-    cache_path = os.path.expanduser('~/.openclaw/patches/patch_check_cache.json')
-    if os.path.exists(cache_path):
+
+    # 1) 权威来源：本地实际版本文件
+    ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
+    if os.path.exists(ver_file):
         try:
-            cached = json.load(open(cache_path))
-            info.update(cached)
+            info['local_version'] = open(ver_file).read().strip()
         except Exception:
             pass
-    # 如果缓存不存在，至少读本地版本文件
-    if not info['local_version']:
-        ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
-        if os.path.exists(ver_file):
-            try:
-                info['local_version'] = open(ver_file).read().strip()
-            except Exception:
-                pass
+
+    # 2) 缓存仅在与本地版本一致时才可信
+    cache_path = os.path.expanduser('~/.openclaw/patches/patch_check_cache.json')
+    cache = None
+    if os.path.exists(cache_path):
+        try:
+            cache = json.load(open(cache_path))
+        except Exception:
+            cache = None
+
+    cache_fresh = (
+        bool(cache)
+        and bool(info['local_version'])
+        and cache.get('local_version') == info['local_version']
+    )
+
+    if cache_fresh:
+        for key in ('needs_update', 'latest_version', 'changelog'):
+            if key in cache:
+                info[key] = cache[key]
+    else:
+        # 缓存缺失/过期 → 异步刷新（_deferred_patch_check 内部有 5 分钟节流，不阻塞本请求）
+        try:
+            from apps.dashboard.push_service import _deferred_patch_check
+            _deferred_patch_check()
+        except Exception:
+            pass
+
     return info
 
 
