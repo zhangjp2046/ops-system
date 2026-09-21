@@ -34,7 +34,6 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'customer', 'customer_name',
             'status', 'severity', 'conditions',
-            'auto_create_workorder', 'workorder_template',
             'notify_enabled', 'notify_channels',
             'created_at', 'updated_at'
         ]

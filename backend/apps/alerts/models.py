@@ -1,6 +1,9 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 
+# 导入阈值模型
+from .threshold_models import AlertThreshold, AlertThresholdRule, AlertThresholdTemplate
+
 
 class Alert(models.Model):
     """告警记录模型"""
@@ -109,10 +112,6 @@ class AlertRule(models.Model):
         {'metric': 'memory_usage', 'operator': '>', 'value': 90}
     ]
     """
-    
-    # 自动创建工单
-    auto_create_workorder = models.BooleanField('自动创建工单', default=True)
-    workorder_template = models.JSONField('工单模板', default=dict, blank=True)
     
     # 通知配置
     notify_enabled = models.BooleanField('启用通知', default=False)
