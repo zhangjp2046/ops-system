@@ -34,6 +34,11 @@
           <template #title>告警中心</template>
         </el-menu-item>
 
+        <el-menu-item index="/monitoring/thresholds">
+          <el-icon><Setting /></el-icon>
+          <template #title>阈值配置</template>
+        </el-menu-item>
+
         <el-sub-menu index="/inspection">
           <template #title>
             <el-icon><Calendar /></el-icon>
@@ -43,15 +48,24 @@
           <el-menu-item index="/inspection/records">巡检记录</el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item index="/scheduler">
-          <el-icon><Timer /></el-icon>
-          <template #title>定时任务</template>
+        <el-menu-item index="/skills">
+          <el-icon><Grid /></el-icon>
+          <template #title>任务技能</template>
         </el-menu-item>
 
         <el-menu-item index="/monitor-test">
           <el-icon><Tools /></el-icon>
           <template #title>采集测试</template>
         </el-menu-item>
+
+        <el-sub-menu index="/discovery">
+          <template #title>
+            <el-icon><Search /></el-icon>
+            <span>资产发现</span>
+          </template>
+          <el-menu-item index="/discovery">网络扫描</el-menu-item>
+          <el-menu-item index="/topology">网络拓扑</el-menu-item>
+        </el-sub-menu>
 
         <el-menu-item index="/system">
           <el-icon><Setting /></el-icon>
@@ -105,7 +119,7 @@ import { useUserStore } from '@/store/user'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { 
   Odometer, OfficeBuilding, Box, Monitor, Bell,
-  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools, Timer, Setting
+  User, Lock, ArrowDown, Calendar, Document, Tickets, Tools, Timer, Setting, Grid, Refresh, Delete, Position
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -175,14 +189,38 @@ async function handleCommand(command) {
   width: 200px;
 }
 
-:deep(.el-menu-item) {
-  color: #bfcbd9;
+:deep(.el-menu-item),
+:deep(.el-sub-menu__title) {
+  color: #b8c4d4;
+  background: transparent !important;
 }
 
 :deep(.el-menu-item:hover),
+:deep(.el-sub-menu__title:hover) {
+  color: #ffffff !important;
+  background: #2a3a4c !important;
+}
+
 :deep(.el-menu-item.is-active) {
+  color: #ffffff !important;
   background: #263445 !important;
-  color: #409eff !important;
+  border-right: 3px solid #409eff;
+}
+
+:deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #ffffff !important;
+  background: #263445 !important;
+}
+
+:deep(.el-sub-menu .el-menu-item) {
+  color: #b8c4d4;
+  padding-left: 52px !important;
+  background: transparent !important;
+}
+
+:deep(.el-sub-menu .el-menu-item.is-active) {
+  color: #ffffff !important;
+  background: #2a3a4c !important;
 }
 
 .header {

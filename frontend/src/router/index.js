@@ -76,16 +76,34 @@ const routes = [
         meta: { title: '告警中心', icon: 'Bell' }
       },
       {
-        path: 'scheduler',
-        name: 'Scheduler',
-        component: () => import('@/views/scheduler/SchedulerIndex.vue'),
-        meta: { title: '定时任务', icon: 'Timer' }
+        path: 'monitoring/thresholds',
+        name: 'Thresholds',
+        component: () => import('@/views/ThresholdConfig.vue'),
+        meta: { title: '阈值配置', icon: 'Setting' }
+      },
+      {
+        path: 'skills',
+        name: 'Skills',
+        component: () => import('@/views/skills/SkillsIndex.vue'),
+        meta: { title: '任务技能', icon: 'Grid' }
       },
       {
         path: 'monitor-test',
         name: 'MonitorTest',
         component: () => import('@/views/monitoring/MonitorTest.vue'),
         meta: { title: '采集测试', icon: 'Tools' }
+      },
+      {
+        path: 'discovery',
+        name: 'Discovery',
+        component: () => import('@/views/discovery/DiscoveryIndex.vue'),
+        meta: { title: '资产发现', icon: 'Search' }
+      },
+      {
+        path: 'topology',
+        name: 'Topology',
+        component: () => import('@/views/discovery/TopologyView.vue'),
+        meta: { title: '网络拓扑', icon: 'Connection' }
       },
       {
         path: 'system',

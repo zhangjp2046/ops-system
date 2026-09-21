@@ -40,12 +40,14 @@ INSTALLED_APPS = [
     'apps.customers',
     'apps.monitoring',
     'apps.users',
-    'apps.scheduler',
     'apps.inspection',
     'apps.dashboard',
-    'apps.workorder',
     'apps.alerts',
     'apps.system',
+    'apps.discovery',
+    'apps.skills',
+    'apps.scheduler_v2',
+    'apps.lab_inventory',
 ]
 
 MIDDLEWARE = [
@@ -137,7 +139,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'config.pagination.DefaultPageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',

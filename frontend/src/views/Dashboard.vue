@@ -14,6 +14,53 @@
       </div>
     </div>
     
+    <!-- 知识包更新通知 -->
+    <el-alert
+      v-if="knowledgeStatus && knowledgeStatus.needs_update"
+      :title="'知识包可更新: v' + knowledgeStatus.cached_version + ' → v' + knowledgeStatus.latest_version"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="knowledge-banner"
+    >
+      <template #default>
+        <span>从 ops-center 获取到新版本知识包，</span>
+        <el-button type="warning" size="small" @click="syncKnowledgeNow">一键更新</el-button>
+      </template>
+    </el-alert>
+    <el-alert
+      v-else-if="knowledgeStatus && knowledgeStatus.cached_version && !knowledgeStatus.needs_update"
+      :title="'知识包 v' + knowledgeStatus.cached_version + ' 已是最新'"
+      type="success"
+      show-icon
+      :closable="false"
+      class="knowledge-banner"
+    />
+    
+    <!-- 补丁更新通知 -->
+    <el-alert
+      v-if="patchInfo && patchInfo.needs_update"
+      :title="'系统更新: ' + (patchInfo.local_version || 'v?') + ' → ' + patchInfo.latest_version"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="knowledge-banner"
+    >
+      <template #default>
+        <span>新版本可更新，</span>
+        <el-button type="warning" size="small" @click="showPatchChangelog">查看详情</el-button>
+        <span style="margin-left:8px;font-size:12px;color:#999">运行 bash apply-patch.sh 更新</span>
+      </template>
+    </el-alert>
+    <el-alert
+      v-else-if="patchInfo && patchInfo.local_version && !patchInfo.needs_update"
+      :title="'系统版本: ' + patchInfo.local_version"
+      type="success"
+      show-icon
+      :closable="false"
+      class="knowledge-banner"
+    />
+    
     <!-- 概览统计卡片 -->
     <el-row :gutter="20" class="stats-row">
       <el-col :span="8">
@@ -82,7 +129,7 @@
       </el-col>
       
       <el-col :span="6">
-        <div class="stat-card inspection" @click="goToInspection">
+        <div class="stat-card inspection" @click="goToInspectionRecords">
           <div class="stat-icon">
             <el-icon :size="36"><DocumentChecked /></el-icon>
           </div>
@@ -94,18 +141,59 @@
       </el-col>
       
       <el-col :span="6">
-        <div class="stat-card tasks" @click="goToTasks">
+        <div class="stat-card tasks" @click="goToScheduler">
           <div class="stat-icon">
             <el-icon :size="36"><Timer /></el-icon>
           </div>
           <div class="stat-info">
-            <div class="stat-value">{{ taskStats.task_enabled || 0 }}</div>
-            <div class="stat-label">启用的任务</div>
+            <div class="stat-value">{{ todayInspectionTasks.total || 0 }}</div>
+            <div class="stat-label">今日计划巡检</div>
+            <div class="stat-sub">
+              <span class="text-success">已完成 {{ todayInspectionTasks.completed || 0 }}</span>
+              <span class="text-warning" v-if="todayInspectionTasks.pending"> / 待执行 {{ todayInspectionTasks.pending }}</span>
+              <span class="text-danger" v-if="todayInspectionTasks.failed"> / 失败 {{ todayInspectionTasks.failed }}</span>
+            </div>
           </div>
         </div>
       </el-col>
     </el-row>
     
+    <!-- 推送状态（仅推送启用时显示） -->
+    <el-row :gutter="20" class="stats-row" v-if="pushEnabled">
+      <el-col :span="6">
+        <div class="stat-card push-total">
+          <div class="stat-icon">
+            <el-icon :size="36"><DataLine /></el-icon>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ pushStats?.today_total || 0 }}</div>
+            <div class="stat-label">今日推送次数</div>
+            <div class="stat-sub">
+              <span class="text-success">{{ pushStats?.today_success || 0 }} 成功</span>
+              <span v-if="pushStats?.today_failed" class="text-danger"> / {{ pushStats?.today_failed }} 失败</span>
+            </div>
+          </div>
+        </div>
+      </el-col>
+
+      <el-col :span="6">
+        <div class="stat-card push-last">
+          <div class="stat-icon">
+            <el-icon :size="36"><Clock /></el-icon>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value" style="font-size: 20px;">
+              {{ pushStats?.last_push_at ? formatTime(pushStats.last_push_at) : '从未推送' }}
+            </div>
+            <div class="stat-label">最近推送时间</div>
+            <div v-if="pushStats?.last_fail_at" class="stat-sub text-danger">
+              最后失败: {{ pushStats?.last_fail_error || '' }}
+            </div>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
     <!-- 图表区域 -->
     <el-row :gutter="20" class="charts-row">
       <!-- 资产类型分布 -->
@@ -127,7 +215,6 @@
           <div ref="statusChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
-    </el-row>
     </el-row>
     
     <!-- 详细信息区域 -->
@@ -246,7 +333,8 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { 
   Box, CircleCheck, CircleClose, 
-  Warning, Monitor, DocumentChecked, Timer, Refresh 
+  Warning, Monitor, DocumentChecked, Timer, Refresh,
+  Upload, DataLine, Clock, Document
 } from '@element-plus/icons-vue'
 import { 
   getDashboardStats, getMonitoringStats, getAlertStats, 
@@ -289,6 +377,51 @@ const taskStats = reactive({
   recent_executions: [],
 })
 
+// 推送状态
+const pushStats = ref(null)
+const pushEnabled = ref(false)
+const testing = ref(false)
+
+// 今日巡检任务
+const todayInspectionTasks = ref({ total: 0, completed: 0, pending: 0, failed: 0 })
+
+// 知识包状态
+const knowledgeStatus = ref(null)
+const knowledgeChecking = ref(false)
+
+// 补丁版本信息
+const patchInfo = ref(null)
+
+function showPatchChangelog() {
+  const info = patchInfo.value
+  if (!info || !info.changelog || !info.changelog.length) {
+    ElMessage.info('暂无更新详情')
+    return
+  }
+  const html = info.changelog.map((item, i) => `${i+1}. ${item}`).join('<br>')
+  ElMessageBox.alert(html, '更新内容: ' + info.local_version + ' → ' + info.latest_version, {
+    dangerouslyUseHTMLString: true,
+    confirmButtonText: '知道了',
+  })
+}
+
+async function handlePushToggle(val) {
+  testing.value = true
+  try {
+    const res = await fetch('/api/system/settings/', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ key: 'push.enabled', value: String(val) }])
+    })
+    if (!res.ok) throw new Error('保存失败')
+  } catch (e) {
+    console.error('保存推送设置失败:', e)
+    pushEnabled.value = !val // 回滚
+  } finally {
+    testing.value = false
+  }
+}
+
 // 计算百分比
 const onlinePercentage = computed(() => {
   const total = stats.overview.online_assets + stats.overview.offline_assets
@@ -320,6 +453,38 @@ async function loadAllData() {
   ])
   await nextTick()
   initCharts()
+  loadKnowledgeStatus()
+}
+
+// 加载知识包状态
+async function loadKnowledgeStatus() {
+  knowledgeChecking.value = true
+  try {
+    const res = await fetch('/api/dashboard/knowledge-status/')
+    const data = await res.json()
+    knowledgeStatus.value = data
+  } catch (e) {
+    knowledgeStatus.value = null
+  } finally {
+    knowledgeChecking.value = false
+  }
+}
+
+// 一键更新知识包
+async function syncKnowledgeNow() {
+  try {
+    const res = await fetch('/api/knowledge/trigger-sync/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: '' })
+    })
+    const data = await res.json()
+    ElMessage.success(data.message || '知识包同步已触发')
+    // 3秒后刷新状态
+    setTimeout(loadKnowledgeStatus, 3000)
+  } catch (e) {
+    ElMessage.error('触发同步失败: ' + e.message)
+  }
 }
 
 // 加载驾驶舱统计
@@ -330,7 +495,17 @@ async function loadDashboardStats() {
       Object.assign(stats.overview, res.data.overview || {})
       stats.type_distribution = res.data.type_distribution
       stats.status_distribution = res.data.status_distribution
-      
+
+      // 更新推送状态
+      pushStats.value = res.data.push_stats || null
+      pushEnabled.value = res.data.push_enabled || false
+
+      // 更新补丁版本信息
+      patchInfo.value = res.data.patch_info || null
+
+      // 更新今日巡检任务
+      todayInspectionTasks.value = res.data.today_inspection_tasks || { total: 0, completed: 0, pending: 0, failed: 0 }
+
       // 更新最后检查时间
       if (res.data.overview?.last_check_time) {
         lastCheckTime.value = res.data.overview.last_check_time
@@ -480,8 +655,20 @@ function goToInspection() {
   router.push('/inspection')
 }
 
+function goToInspectionRecords() {
+  router.push('/inspection/records')
+}
+
+function goToScheduler() {
+  router.push('/skills?tab=scheduler')
+}
+
 function goToTasks() {
-  router.push('/scheduler')
+  router.push('/skills?tab=scheduler')
+}
+
+function goToSettings() {
+  router.push('/system/settings')
 }
 
 // 工具函数
@@ -580,6 +767,10 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
+.knowledge-banner {
+  margin-bottom: 16px;
+}
+
 .page-header h2 {
   margin: 0;
   font-size: 24px;
@@ -637,6 +828,16 @@ onUnmounted(() => {
 .stat-card.monitoring .stat-icon { background: linear-gradient(135deg, #909399 0%, #a6a9ad 100%); }
 .stat-card.inspection .stat-icon { background: linear-gradient(135deg, #36cfc9 0%, #5bc0de 100%); }
 .stat-card.tasks .stat-icon { background: linear-gradient(135deg, #ba55d3 0%, #d27cd8 100%); }
+.stat-card.push-enabled .stat-icon { background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%); }
+.stat-card.push-disabled .stat-icon { background: linear-gradient(135deg, #909399 0%, #a6a9ad 100%); }
+.stat-card.push-total .stat-icon { background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%); }
+.stat-card.push-last .stat-icon { background: linear-gradient(135deg, #e6a23c 0%, #ebb563 100%); }
+.stat-card.push-detail .stat-icon { background: linear-gradient(135deg, #36cfc9 0%, #5bc0de 100%); }
+.text-success { color: #67c23a; }
+.text-danger { color: #f56c6c; }
+.text-warning { color: #e6a23c; }
+.stat-sub .text-danger { color: #f56c6c; font-size: 11px; }
+.stat-sub .text-warning { color: #e6a23c; font-size: 11px; }
 
 .stat-info {
   flex: 1;

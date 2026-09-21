@@ -103,6 +103,7 @@
 
               <el-form-item>
                 <el-button type="primary" @click="testPush" :loading="testing">验证连接</el-button>
+                <el-button type="success" @click="pushReport" :loading="reporting">推送资产报表</el-button>
               </el-form-item>
             </template>
           </el-form>
@@ -155,6 +156,7 @@ const activeCategory = ref('general')
 const saving = ref(false)
 const savingCustomer = ref(false)
 const testing = ref(false)
+const reporting = ref(false)
 const verifyResult = ref(null)
 
 // 客户信息
@@ -278,6 +280,18 @@ async function testPush() {
   } catch (e) {
     verifyResult.value = { success: false, message: e.response?.data?.message || '连接失败' }
   } finally { testing.value = false }
+}
+
+async function pushReport() {
+  reporting.value = true
+  try {
+    const res = await fetch('/api/dashboard/push-report/', { method: 'POST' })
+    const data = await res.json()
+    if (data.success) ElMessage.success(data.message)
+    else ElMessage.error(data.message || '推送失败')
+  } catch (e) {
+    ElMessage.error('推送失败: ' + e.message)
+  } finally { reporting.value = false }
 }
 
 onMounted(() => { loadCustomer(); loadSettings() })
