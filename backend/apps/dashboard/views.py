@@ -15,7 +15,8 @@ from apps.assets.models import Asset, AssetType, AssetData
 from apps.customers.models import Customer
 from apps.monitoring.models import MonitoringTask, MonitoringResult, Alert
 from apps.inspection.models import InspectionPlan, InspectionTask, InspectionRecord
-from apps.scheduler.models import ScheduledTask, ScheduledTaskExecution
+from apps.scheduler_v2.models import Plan as ScheduledTask
+from apps.scheduler_v2.models import PlanExecution as ScheduledTaskExecution
 
 
 class DashboardStatsView(APIView):
@@ -72,8 +73,87 @@ class DashboardStatsView(APIView):
                 'importance_distribution': list(importance_stats),
                 'type_distribution': list(type_stats),
                 'customer_distribution': list(customer_stats),
+                # 推送统计
+                'push_stats': _get_push_stats(),
+                'push_enabled': _is_push_enabled(),
+                # 补丁版本信息
+                'patch_info': _get_patch_info(),
+                # 今日巡检任务
+                'today_inspection_tasks': _get_today_inspection_tasks(),
             }
         })
+
+
+def _get_push_stats():
+    """获取推送统计"""
+    from apps.dashboard.models import PushLog
+    from datetime import datetime, timedelta
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    today_logs = PushLog.objects.filter(
+        created_at__gte=today_start,
+        created_at__lt=today_end
+    )
+    last_success = PushLog.objects.filter(status='success').order_by('-created_at').first()
+    last_fail = PushLog.objects.filter(status='failed').order_by('-created_at').first()
+    return {
+        'today_total': today_logs.count(),
+        'today_success': today_logs.filter(status='success').count(),
+        'today_failed': today_logs.filter(status='failed').count(),
+        'last_push_at': last_success.created_at.isoformat() if last_success else None,
+        'last_fail_at': last_fail.created_at.isoformat() if last_fail else None,
+        'last_fail_error': last_fail.error_message if last_fail else None,
+    }
+
+
+def _is_push_enabled():
+    """检查推送是否启用"""
+    try:
+        from apps.system.models import SystemSetting
+        return SystemSetting.get('push.enabled', 'false').lower() == 'true'
+    except Exception:
+        return False
+
+
+def _get_patch_info():
+    """获取本地补丁版本信息，以及是否有新版本"""
+    import os, json
+    info = {
+        'local_version': '',
+        'needs_update': False,
+        'latest_version': '',
+        'changelog': [],
+    }
+    # 读取补丁检查缓存（由 push_service._deferred_patch_check 写入）
+    cache_path = os.path.expanduser('~/.openclaw/patches/patch_check_cache.json')
+    if os.path.exists(cache_path):
+        try:
+            cached = json.load(open(cache_path))
+            info.update(cached)
+        except Exception:
+            pass
+    # 如果缓存不存在，至少读本地版本文件
+    if not info['local_version']:
+        ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
+        if os.path.exists(ver_file):
+            try:
+                info['local_version'] = open(ver_file).read().strip()
+            except Exception:
+                pass
+    return info
+
+
+def _get_today_inspection_tasks():
+    """获取今日巡检任务统计（基于 InspectionRecord）"""
+    today = timezone.now().date()
+    records_today = InspectionRecord.objects.filter(created_at__date=today)
+    return {
+        'total': records_today.count(),
+        'completed': records_today.filter(status='completed').count(),
+        'pending': records_today.filter(status='pending').count(),
+        'failed': records_today.filter(overall_status='fail').count(),
+    }
 
 
 class MonitoringStatsView(APIView):
@@ -280,13 +360,13 @@ class TaskStatsView(APIView):
         """获取任务统计数据"""
         # 定时任务统计
         task_total = ScheduledTask.objects.count()
-        task_enabled = ScheduledTask.objects.filter(is_enabled=True).count()
-        task_running = ScheduledTask.objects.filter(is_running=True).count()
+        task_enabled = ScheduledTask.objects.filter(status='active').count()
+        task_running = ScheduledTask.objects.filter(status='active').count()
         
         # 按任务类型统计
-        type_stats = ScheduledTask.objects.values('task_type').annotate(
+        type_stats = ScheduledTask.objects.values('plan_type').annotate(
             total=Count('id'),
-            enabled=Count('id', filter=Q(is_enabled=True)),
+            enabled=Count('id', filter=Q(status='active')),
         )
         
         # 今日执行统计
@@ -317,8 +397,8 @@ class TaskStatsView(APIView):
                 'type_stats': list(type_stats),
                 'recent_executions': [{
                     'id': e.id,
-                    'task_name': e.task.name if e.task else None,
-                    'task_type': e.task.task_type if e.task else None,
+                    'task_name': getattr(e.plan, 'name', None) if e.plan else None,
+                    'task_type': getattr(e.plan, 'plan_type', None) if e.plan else None,
                     'status': e.status,
                     'start_time': e.start_time,
                     'end_time': e.end_time,
@@ -402,3 +482,67 @@ class AssetHealthView(APIView):
             },
             'message': f'检测完成: 在线{result["online"]}台, 离线{result["offline"]}台, 耗时{result["elapsed_seconds"]}秒'
         })
+
+class PushRetryView(APIView):
+    permission_classes = [permissions.AllowAny]
+    def get(self, request):
+        from apps.dashboard.models import PushLog
+        push_type = request.query_params.get('type')
+        status = request.query_params.get('status', 'failed')
+        pending_only = request.query_params.get('pending') == '1'
+        qs = PushLog.objects.filter(status=status)
+        if push_type:
+            qs = qs.filter(push_type=push_type)
+        if pending_only:
+            qs = qs.filter(retry_count__lt=5).filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=timezone.now()))
+        logs = qs[:50]
+        return Response({'success': True, 'count': logs.count(), 'logs': [{
+            'id': log.id, 'push_type': log.push_type, 'status': log.status,
+            'endpoint': log.endpoint, 'records_count': log.records_count,
+            'error_message': log.error_message, 'retry_count': log.retry_count,
+            'next_retry_at': log.next_retry_at.isoformat() if log.next_retry_at else None,
+            'created_at': log.created_at.isoformat(),
+        } for log in logs]})
+    def post(self, request):
+        from .push_service import retry_failed
+        log_id = request.data.get('log_id')
+        push_type = request.query_params.get('type')
+        if not log_id and not push_type:
+            return Response({'success': False, 'message': '请指定 log_id 或 type 参数'}, status=400)
+        success, failed = retry_failed(log_id=log_id, push_type=push_type, limit=20)
+        return Response({'success': True, 'message': f'重试完成: {success} 成功, {failed} 失败',
+            'success_count': success, 'failed_count': failed})
+
+
+class PushReportView(APIView):
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        from .push_service import get_config, _post
+        enabled, url, api_key, timeout = get_config()
+        if not enabled or not url:
+            return Response({'success': False, 'message': '推送未启用或未配置中心地址'}, status=400)
+        from apps.assets.models import Asset
+        from apps.monitoring.models import Alert
+        assets = Asset.objects.all()
+        total = assets.count()
+        active_assets = assets.filter(online=True).count()
+        open_alerts = Alert.objects.filter(status__in=['new', 'acknowledged']).count()
+        payload = {
+            'report_type': 'asset_inventory',
+            'generated_at': timezone.now().isoformat(),
+            'summary': {
+                'total_assets': total, 'active_assets': active_assets,
+                'offline_assets': total - active_assets, 'open_alerts': open_alerts,
+            },
+            'assets': [{
+                'id': a.id, 'name': a.asset_name, 'ip': a.ip_address or '',
+                'type': str(a.asset_type) if a.asset_type else '',
+                'status': a.status or '', 'online': a.online,
+            } for a in assets[:200]],
+        }
+        result = _post('reports/', payload, push_type='report')
+        if result:
+            return Response({'success': True, 'message': f'资产报表已推送 (总资产: {total}, 在线: {active_assets})',
+                'total_assets': total, 'active_assets': active_assets})
+        else:
+            return Response({'success': False, 'message': '推送失败'}, status=502)

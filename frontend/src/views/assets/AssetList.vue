@@ -15,23 +15,6 @@
     <!-- 搜索和筛选 -->
     <el-card class="filter-card">
       <el-form :inline="true" :model="filterForm">
-        <el-form-item label="客户">
-          <el-select
-            v-model="filterForm.customer"
-            placeholder="选择客户"
-            clearable
-            style="width: 200px"
-            @change="handleFilterChange"
-          >
-            <el-option
-              v-for="customer in customers"
-              :key="customer.id"
-              :label="customer.customer_name"
-              :value="customer.id"
-            />
-          </el-select>
-        </el-form-item>
-        
         <el-form-item label="资产类型">
           <el-select
             v-model="filterForm.asset_type"
@@ -46,6 +29,25 @@
               :label="type.type_name"
               :value="type.id"
             />
+          </el-select>
+        </el-form-item>
+        
+        <el-form-item label="协议">
+          <el-select
+            v-model="filterForm.protocol"
+            placeholder="选择协议"
+            clearable
+            style="width: 130px"
+            @change="handleFilterChange"
+          >
+            <el-option label="SNMP" value="snmp" />
+            <el-option label="SSH" value="ssh" />
+            <el-option label="Ping" value="ping" />
+            <el-option label="MySQL" value="mysql" />
+            <el-option label="MSSQL" value="mssql" />
+            <el-option label="Oracle" value="oracle" />
+            <el-option label="PostgreSQL" value="postgresql" />
+            <el-option label="端口检测" value="port" />
           </el-select>
         </el-form-item>
         
@@ -113,7 +115,7 @@
         
         <el-table-column prop="asset_type_name" label="资产类型" width="120" />
         
-        <el-table-column prop="customer_name" label="所属客户" width="150" />
+        <el-table-column prop="protocol" label="资产协议" width="150" />
 
         <el-table-column prop="online" label="在线状态" width="100" align="center">
           <template #default="{ row }">
@@ -186,7 +188,6 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAssetList, deleteAsset, getAssetTypeList } from '@/api/asset'
-import { getCustomerList } from '@/api/customer'
 import api from '@/api/index'
 import { formatDate, getStatusType, getStatusText, getImportanceType, getImportanceText, getOnlineType, getOnlineText } from '@/utils/format'
 import { Plus, Search, Refresh, View, Edit, Delete } from '@element-plus/icons-vue'
@@ -195,11 +196,10 @@ const router = useRouter()
 
 const loading = ref(false)
 const assets = ref([])
-const customers = ref([])
 const assetTypes = ref([])
 
 const filterForm = reactive({
-  customer: null,
+  protocol: '',
   asset_type: null,
   status: '',
   search: ''
@@ -224,7 +224,6 @@ async function handleRefresh() {
 }
 
 onMounted(() => {
-  loadCustomers()
   loadAssetTypes()
   handleRefresh()
   // 每60秒自动刷新一次（ping检测在线状态）
@@ -234,15 +233,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (refreshInterval) clearInterval(refreshInterval)
 })
-
-async function loadCustomers() {
-  try {
-    const res = await getCustomerList({ page_size: 100 })
-    customers.value = res.results || []
-  } catch (error) {
-    console.error('加载客户失败:', error)
-  }
-}
 
 async function loadAssetTypes() {
   try {
@@ -261,8 +251,8 @@ async function loadAssets() {
       page_size: pagination.page_size
     }
     
-    if (filterForm.customer) {
-      params.customer = filterForm.customer
+    if (filterForm.protocol) {
+      params.protocol = filterForm.protocol
     }
     if (filterForm.asset_type) {
       params.asset_type = filterForm.asset_type
@@ -275,6 +265,7 @@ async function loadAssets() {
     }
     
     const res = await getAssetList(params)
+    console.log(res.results)
     assets.value = res.results || []
     pagination.total = res.count || 0
   } catch (error) {
@@ -291,7 +282,7 @@ function handleFilterChange() {
 }
 
 function handleReset() {
-  filterForm.customer = null
+  filterForm.protocol = ''
   filterForm.asset_type = null
   filterForm.status = ''
   filterForm.search = ''

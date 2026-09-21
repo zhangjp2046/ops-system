@@ -155,6 +155,7 @@ class Asset(models.Model):
         ('oracle', 'Oracle'),
         ('postgresql', 'PostgreSQL'),
         ('port', '端口检测'),
+        ('ntp', 'NTP时间同步'),
     ]
     protocol = models.CharField('采集协议', max_length=20, choices=PROTOCOL_CHOICES, blank=True, default='')
     db_type = models.CharField('数据库类型', max_length=20, blank=True, default='')
@@ -340,3 +341,248 @@ class AssetStatusHistory(models.Model):
     
     def __str__(self):
         return f'{self.asset.asset_name} - {self.status} ({self.created_at})'
+
+
+class AssetTransfer(models.Model):
+    """资产调拨模型"""
+    
+    STATUS_CHOICES = [
+        ('PENDING', '待调拨'),
+        ('APPROVED', '已审批'),
+        ('REJECTED', '已拒绝'),
+        ('COMPLETED', '已完成'),
+        ('CANCELLED', '已取消'),
+    ]
+    
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='asset_transfers', verbose_name='客户'
+    )
+    asset = models.ForeignKey(
+        'Asset', on_delete=models.CASCADE,
+        related_name='transfers', verbose_name='资产'
+    )
+    
+    # 调拨信息
+    transfer_no = models.CharField('调拨单号', max_length=50, unique=True)
+    from_department = models.CharField('调出部门', max_length=100)
+    to_department = models.CharField('调入部门', max_length=100)
+    from_location = models.CharField('调出位置', max_length=200, blank=True)
+    to_location = models.CharField('调入位置', max_length=200, blank=True)
+    reason = models.TextField('调拨原因', blank=True)
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    # 审批信息
+    applicant = models.CharField('申请人', max_length=100)
+    approver = models.CharField('审批人', max_length=100, blank=True)
+    approve_time = models.DateTimeField('审批时间', null=True, blank=True)
+    approve_comment = models.TextField('审批意见', blank=True)
+    
+    # 执行信息
+    executor = models.CharField('执行人', max_length=100, blank=True)
+    execute_time = models.DateTimeField('执行时间', null=True, blank=True)
+    
+    # 时间
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+    
+    class Meta:
+        db_table = 'asset_transfers'
+        verbose_name = '资产调拨'
+        verbose_name_plural = '资产调拨管理'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f'{self.transfer_no} - {self.asset.asset_name}'
+
+
+class AssetRepair(models.Model):
+    """资产维修模型"""
+    
+    STATUS_CHOICES = [
+        ('APPLIED', '已申请'),
+        ('ASSIGNED', '已派工'),
+        ('ACCEPTED', '已接单'),
+        ('PROCESSING', '维修中'),
+        ('COMPLETED', '已完成'),
+        ('QUALIFIED', '已验收'),
+        ('REJECTED', '已拒绝'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('LOW', '低'),
+        ('MEDIUM', '中'),
+        ('HIGH', '高'),
+        ('URGENT', '紧急'),
+    ]
+    
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='asset_repairs', verbose_name='客户'
+    )
+    asset = models.ForeignKey(
+        'Asset', on_delete=models.CASCADE,
+        related_name='repairs', verbose_name='资产'
+    )
+    
+    # 维修单信息
+    repair_no = models.CharField('维修单号', max_length=50, unique=True)
+    fault_description = models.TextField('故障描述')
+    fault_time = models.DateTimeField('故障时间', null=True, blank=True)
+    repair_type = models.CharField('维修类型', max_length=50, blank=True)
+    priority = models.CharField('优先级', max_length=20, choices=PRIORITY_CHOICES, default='MEDIUM')
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='APPLIED')
+    
+    # 费用信息
+    repair_cost = models.DecimalField('维修费用', max_digits=10, decimal_places=2, default=0)
+    parts_cost = models.DecimalField('配件费用', max_digits=10, decimal_places=2, default=0)
+    total_cost = models.DecimalField('总费用', max_digits=10, decimal_places=2, default=0)
+    
+    # 维修人员
+    assignee = models.CharField('维修人员', max_length=100, blank=True)
+    assignee_phone = models.CharField('维修电话', max_length=50, blank=True)
+    
+    # 维修结果
+    repair_result = models.TextField('维修结果', blank=True)
+    repair_time = models.DateTimeField('维修时间', null=True, blank=True)
+    repair_duration = models.IntegerField('维修时长(小时)', default=0)
+    
+    # 验收
+    accept_result = models.CharField('验收结果', max_length=100, blank=True)
+    accept_comment = models.TextField('验收意见', blank=True)
+    accept_time = models.DateTimeField('验收时间', null=True, blank=True)
+    accept_by = models.CharField('验收人', max_length=100, blank=True)
+    
+    # 时间
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+    
+    class Meta:
+        db_table = 'asset_repairs'
+        verbose_name = '资产维修'
+        verbose_name_plural = '资产维修管理'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f'{self.repair_no} - {self.asset.asset_name}'
+
+
+class AssetScrap(models.Model):
+    """资产报废模型"""
+    
+    STATUS_CHOICES = [
+        ('APPLIED', '已申请'),
+        ('APPROVED', '已审批'),
+        ('REJECTED', '已拒绝'),
+        ('SCRAPPED', '已报废'),
+    ]
+    
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='asset_scraps', verbose_name='客户'
+    )
+    asset = models.ForeignKey(
+        'Asset', on_delete=models.CASCADE,
+        related_name='scraps', verbose_name='资产'
+    )
+    
+    # 报废单信息
+    scrap_no = models.CharField('报废单号', max_length=50, unique=True)
+    scrap_reason = models.TextField('报废原因')
+    scrap_type = models.CharField('报废类型', max_length=50, blank=True)
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='APPLIED')
+    
+    # 资产原值
+    original_value = models.DecimalField('原值', max_digits=12, decimal_places=2, default=0)
+    net_value = models.DecimalField('净值', max_digits=12, decimal_places=2, default=0)
+    depreciation_rate = models.DecimalField('折旧率(%)', max_digits=5, decimal_places=2, default=0)
+    
+    # 处理信息
+    handler = models.CharField('处理人', max_length=100, blank=True)
+    handler_phone = models.CharField('处理人电话', max_length=50, blank=True)
+    disposal_method = models.CharField('处理方式', max_length=100, blank=True)
+    disposal_result = models.TextField('处理结果', blank=True)
+    
+    # 审批信息
+    approver = models.CharField('审批人', max_length=100, blank=True)
+    approve_time = models.DateTimeField('审批时间', null=True, blank=True)
+    approve_comment = models.TextField('审批意见', blank=True)
+    
+    # 执行信息
+    scrap_time = models.DateTimeField('报废时间', null=True, blank=True)
+    scrap_by = models.CharField('报废执行人', max_length=100, blank=True)
+    
+    # 时间
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+    
+    class Meta:
+        db_table = 'asset_scraps'
+        verbose_name = '资产报废'
+        verbose_name_plural = '资产报废管理'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f'{self.scrap_no} - {self.asset.asset_name}'
+
+
+class AssetLend(models.Model):
+    """资产出借模型"""
+    
+    STATUS_CHOICES = [
+        ('PENDING', '待审批'),
+        ('APPROVED', '已审批'),
+        ('REJECTED', '已拒绝'),
+        ('OUT', '已借出'),
+        ('RETURNED', '已归还'),
+        ('OVERDUE', '已逾期'),
+        ('CANCELLED', '已取消'),
+    ]
+    
+    customer = models.ForeignKey(
+        'customers.Customer', on_delete=models.CASCADE,
+        related_name='asset_lends', verbose_name='客户'
+    )
+    asset = models.ForeignKey(
+        'Asset', on_delete=models.CASCADE,
+        related_name='lends', verbose_name='资产'
+    )
+    
+    # 出借单信息
+    lend_no = models.CharField('出借单号', max_length=50, unique=True)
+    from_department = models.CharField('借出部门', max_length=100)
+    to_department = models.CharField('借往部门', max_length=100)
+    to_location = models.CharField('借往地点', max_length=200, blank=True)
+    lendee = models.CharField('借用人', max_length=100)
+    lendee_phone = models.CharField('联系电话', max_length=50, blank=True)
+    reason = models.TextField('出借原因', blank=True)
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    # 审批信息
+    approver = models.CharField('审批人', max_length=100, blank=True)
+    approve_time = models.DateTimeField('审批时间', null=True, blank=True)
+    approve_comment = models.TextField('审批意见', blank=True)
+    
+    # 借出信息
+    lend_date = models.DateField('借出日期', null=True, blank=True)
+    lend_executor = models.CharField('借出执行人', max_length=100, blank=True)
+    
+    # 归还信息
+    expected_return_date = models.DateField('预计归还日期', null=True, blank=True)
+    actual_return_date = models.DateField('实际归还日期', null=True, blank=True)
+    return_acceptance = models.TextField('归还验收', blank=True)
+    return_acceptor = models.CharField('归还接收人', max_length=100, blank=True)
+    return_executor = models.CharField('归还执行人', max_length=100, blank=True)
+    
+    # 时间
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+    
+    class Meta:
+        db_table = 'asset_lends'
+        verbose_name = '资产出借'
+        verbose_name_plural = '资产出借管理'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f'{self.lend_no} - {self.asset.asset_name}'

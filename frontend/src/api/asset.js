@@ -89,3 +89,145 @@ export function deleteAssetType(id) {
 export function getAssetTypeFields(id) {
   return api.get(`/assets/types/${id}/fields/`)
 }
+// ========== 资产调拨 API ==========
+
+export function getTransferList(params) {
+  return api.get('/assets/transfers/', { params })
+}
+
+export function getTransfer(id) {
+  return api.get(`/assets/transfers/${id}/`)
+}
+
+export function createTransfer(data) {
+  return api.post('/assets/transfers/', data)
+}
+
+export function updateTransfer(id, data) {
+  return api.put(`/assets/transfers/${id}/`, data)
+}
+
+export function deleteTransfer(id) {
+  return api.delete(`/assets/transfers/${id}/`)
+}
+
+export function approveTransfer(id, comment) {
+  return api.post(`/assets/transfers/${id}/approve/`, { comment })
+}
+
+export function rejectTransfer(id, comment) {
+  return api.post(`/assets/transfers/${id}/reject/`, { comment })
+}
+
+export function executeTransfer(id) {
+  return api.post(`/assets/transfers/${id}/execute/`)
+}
+
+// ========== 资产维修 API ==========
+
+export function getRepairList(params) {
+  return api.get('/assets/repairs/', { params })
+}
+
+export function getRepair(id) {
+  return api.get(`/assets/repairs/${id}/`)
+}
+
+export function createRepair(data) {
+  return api.post('/assets/repairs/', data)
+}
+
+export function updateRepair(id, data) {
+  return api.put(`/assets/repairs/${id}/`, data)
+}
+
+export function deleteRepair(id) {
+  return api.delete(`/assets/repairs/${id}/`)
+}
+
+export function assignRepair(id, assignee, assigneePhone) {
+  return api.post(`/assets/repairs/${id}/assign/`, { assignee, assignee_phone: assigneePhone })
+}
+
+export function acceptRepair(id) {
+  return api.post(`/assets/repairs/${id}/accept/`)
+}
+
+export function processRepair(id) {
+  return api.post(`/assets/repairs/${id}/process/`)
+}
+
+export function completeRepair(id, repairResult, repairCost, partsCost) {
+  return api.post(`/assets/repairs/${id}/complete/`, { repair_result: repairResult, repair_cost: repairCost, parts_cost: partsCost })
+}
+
+export function acceptRepairInspect(id, acceptResult, acceptComment) {
+  return api.post(`/assets/repairs/${id}/accept-inspect/`, { accept_result: acceptResult, accept_comment: acceptComment })
+}
+
+// ========== 资产报废 API ==========
+
+export function getScrapList(params) {
+  return api.get('/assets/scraps/', { params })
+}
+
+export function getScrap(id) {
+  return api.get(`/assets/scraps/${id}/`)
+}
+
+export function createScrap(data) {
+  return api.post('/assets/scraps/', data)
+}
+
+export function updateScrap(id, data) {
+  return api.put(`/assets/scraps/${id}/`, data)
+}
+
+export function deleteScrap(id) {
+  return api.delete(`/assets/scraps/${id}/`)
+}
+
+export function approveScrap(id, action, comment) {
+  return api.post(`/assets/scraps/${id}/approve/`, { action, comment })
+}
+
+export function executeScrap(id, disposalResult) {
+  return api.post(`/assets/scraps/${id}/execute/`, { disposal_result: disposalResult })
+}
+
+// ========== 资产出借 API ==========
+
+export function getLendList(params) {
+  return api.get('/assets/lends/', { params })
+}
+
+export function getLend(id) {
+  return api.get(`/assets/lends/${id}/`)
+}
+
+export function createLend(data) {
+  return api.post('/assets/lends/', data)
+}
+
+export function updateLend(id, data) {
+  return api.put(`/assets/lends/${id}/`, data)
+}
+
+export function deleteLend(id) {
+  return api.delete(`/assets/lends/${id}/`)
+}
+
+export function approveLend(id, action, comment) {
+  return api.post(`/assets/lends/${id}/approve/`, { action, comment })
+}
+
+export function lendOut(id) {
+  return api.post(`/assets/lends/${id}/lend_out/`)
+}
+
+export function returnLend(id, returnAcceptance) {
+  return api.post(`/assets/lends/${id}/return_asset/`, { return_acceptance: returnAcceptance })
+}
+
+export function checkOverdue(id) {
+  return api.post(`/assets/lends/${id}/check_overdue/`)}

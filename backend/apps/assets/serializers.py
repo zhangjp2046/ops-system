@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
-from .models import Asset, AssetType, AssetField, AssetData
+from .models import Asset, AssetType, AssetField, AssetData, AssetTransfer, AssetRepair, AssetScrap, AssetLend
 from apps.customers.models import Customer
 from apps.users.models import User
 
@@ -313,3 +313,155 @@ class AssetImportSerializer(serializers.Serializer):
             'errors': errors,
             'assets': AssetSerializer(created_assets, many=True).data
         }
+
+class AssetTransferSerializer(serializers.ModelSerializer):
+    """资产调拨序列化器"""
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    status_text = serializers.CharField(source='get_status_display', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    
+    class Meta:
+        model = AssetTransfer
+        fields = [
+            'id', 'customer', 'customer_name', 'asset', 'asset_name', 'asset_code',
+            'transfer_no', 'from_department', 'to_department',
+            'from_location', 'to_location', 'reason',
+            'status', 'status_text',
+            'applicant', 'approver', 'approve_time', 'approve_comment',
+            'executor', 'execute_time',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class AssetTransferCreateSerializer(serializers.ModelSerializer):
+    """资产调拨创建序列化器"""
+    
+    class Meta:
+        model = AssetTransfer
+        fields = [
+            'customer', 'asset',
+            'from_department', 'to_department',
+            'from_location', 'to_location', 'reason',
+            'applicant'
+        ]
+    
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['applicant'] = request.user.username
+        return super().create(validated_data)
+
+
+class AssetRepairSerializer(serializers.ModelSerializer):
+    """资产维修序列化器"""
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    status_text = serializers.CharField(source='get_status_display', read_only=True)
+    priority_text = serializers.CharField(source='get_priority_display', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    
+    class Meta:
+        model = AssetRepair
+        fields = [
+            'id', 'customer', 'customer_name', 'asset', 'asset_name', 'asset_code',
+            'repair_no', 'fault_description', 'fault_time', 'repair_type',
+            'priority', 'priority_text', 'status', 'status_text',
+            'repair_cost', 'parts_cost', 'total_cost',
+            'assignee', 'assignee_phone',
+            'repair_result', 'repair_time', 'repair_duration',
+            'accept_result', 'accept_comment', 'accept_time', 'accept_by',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class AssetRepairCreateSerializer(serializers.ModelSerializer):
+    """资产维修创建序列化器"""
+    
+    class Meta:
+        model = AssetRepair
+        fields = [
+            'customer', 'asset',
+            'fault_description', 'fault_time', 'repair_type', 'priority'
+        ]
+
+
+class AssetScrapSerializer(serializers.ModelSerializer):
+    """资产报废序列化器"""
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    status_text = serializers.CharField(source='get_status_display', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    
+    class Meta:
+        model = AssetScrap
+        fields = [
+            'id', 'customer', 'customer_name', 'asset', 'asset_name', 'asset_code',
+            'scrap_no', 'scrap_reason', 'scrap_type', 'status', 'status_text',
+            'original_value', 'net_value', 'depreciation_rate',
+            'handler', 'handler_phone', 'disposal_method', 'disposal_result',
+            'approver', 'approve_time', 'approve_comment',
+            'scrap_time', 'scrap_by',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class AssetScrapCreateSerializer(serializers.ModelSerializer):
+    """资产报废创建序列化器"""
+    
+    class Meta:
+        model = AssetScrap
+        fields = [
+            'customer', 'asset',
+            'scrap_reason', 'scrap_type',
+            'original_value', 'net_value', 'depreciation_rate',
+            'handler', 'handler_phone', 'disposal_method'
+        ]
+
+
+class AssetLendSerializer(serializers.ModelSerializer):
+    """资产出借序列化器"""
+    asset_name = serializers.CharField(source='asset.asset_name', read_only=True)
+    asset_code = serializers.CharField(source='asset.asset_code', read_only=True)
+    status_text = serializers.CharField(source='get_status_display', read_only=True)
+    customer_name = serializers.CharField(source='customer.customer_name', read_only=True)
+    is_overdue = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = AssetLend
+        fields = [
+            'id', 'customer', 'customer_name', 'asset', 'asset_name', 'asset_code',
+            'lend_no', 'from_department', 'to_department', 'to_location',
+            'lendee', 'lendee_phone', 'reason',
+            'status', 'status_text',
+            'approver', 'approve_time', 'approve_comment',
+            'lend_date', 'lend_executor',
+            'expected_return_date', 'actual_return_date',
+            'return_acceptance', 'return_acceptor', 'return_executor',
+            'is_overdue',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_is_overdue(self, obj):
+        """是否逾期"""
+        if obj.expected_return_date and obj.status in ['OUT', 'OVERDUE']:
+            from django.utils import timezone
+            return obj.expected_return_date < timezone.now().date()
+        return False
+
+
+class AssetLendCreateSerializer(serializers.ModelSerializer):
+    """资产出借创建序列化器"""
+    
+    class Meta:
+        model = AssetLend
+        fields = [
+            'customer', 'asset',
+            'from_department', 'to_department', 'to_location',
+            'lendee', 'lendee_phone', 'reason',
+            'expected_return_date'
+        ]

@@ -118,6 +118,23 @@
           </el-col>
         </el-row>
         
+        <!-- SNMP 专用配置 -->
+        <el-row :gutter="20" v-if="form.protocol === 'snmp'">
+          <el-col :span="12">
+            <el-form-item label="SNMP端口">
+              <el-input-number v-model="form.port" :min="1" :max="65535" placeholder="161" style="width: 100%" />
+              <div class="form-tip">默认 161</div>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="SNMP Community">
+              <el-input v-model="form.password" placeholder="默认 public" />
+              <div class="form-tip">用于 SNMP v1/v2c 认证</div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        
+        <!-- SSH / 数据库 端口+凭据 -->
         <el-row :gutter="20" v-if="form.protocol && form.protocol !== 'ping' && form.protocol !== 'snmp'">
           <el-col :span="12">
             <el-form-item label="端口">

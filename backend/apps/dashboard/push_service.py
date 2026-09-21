@@ -4,7 +4,9 @@
 配置从 system_settings 表读取
 """
 import json
+import os
 import logging
+import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -67,6 +69,7 @@ def record_monitoring_data(task):
     # 获取该任务的巡检结果
     results = InspectionResult.objects.filter(task=task)
     created = 0
+    abnormal_points = []
 
     for r in results:
         if r.check_item_code not in monitoring_thresholds:
@@ -95,7 +98,7 @@ def record_monitoring_data(task):
         error_th = str(threshold.error_threshold) if threshold.error_threshold else ''
 
         try:
-            MonitoringDataPoint.objects.create(
+            dp = MonitoringDataPoint.objects.create(
                 customer=asset.customer,
                 asset=asset,
                 inspection_task=task,
@@ -112,13 +115,55 @@ def record_monitoring_data(task):
                 recorded_at=recorded_at,
             )
             created += 1
+
+            # 收集非正常数据点（severity >= 2），稍后推送到 center
+            if severity >= 2:
+                remote_data_id = f'{task.id}_{r.check_item_code}'
+                abnormal_points.append({
+                    'remote_data_id': remote_data_id,
+                    'asset_name': asset.asset_name or '',
+                    'asset_ip': asset.ip_address or '',
+                    'asset_type': str(asset.asset_type.type_name) if asset.asset_type else '',
+                    'check_item_code': r.check_item_code,
+                    'check_item_name': r.check_item or '',
+                    'protocol': protocol,
+                    'numeric_value': numeric_value,
+                    'display_value': display_value,
+                    'severity': severity,
+                    'result_message': r.result_message or '',
+                    'suggestion': r.suggestion or '',
+                    'warning_threshold': warning_th,
+                    'error_threshold': error_th,
+                    'recorded_at': recorded_at.isoformat() if recorded_at else '',
+                })
         except Exception as e:
             logger.warning(f'记录监控数据失败 [{asset.asset_name}/{r.check_item_code}]: {e}')
 
     if created > 0:
         logger.info(f'记录了 {created} 条监控数据点 [{asset.asset_name}]')
 
+    # 异步推送非正常数据到 ops-center
+    if abnormal_points:
+        import threading
+        points_copy = list(abnormal_points)
+        threading.Thread(
+            target=lambda: _async_push_monitoring_data(points_copy),
+            daemon=True
+        ).start()
+
     return created
+
+
+def _async_push_monitoring_data(abnormal_points):
+    """后台线程：推送非正常监控数据到 ops-center"""
+    try:
+        result = push_monitoring_data(abnormal_points)
+        if result is not None:
+            logger.info(f'推送 {len(abnormal_points)} 条监控异常数据到 center 成功')
+        else:
+            logger.warning(f'推送 {len(abnormal_points)} 条监控异常数据到 center 失败')
+    except Exception as e:
+        logger.error(f'推送监控异常数据异常: {e}')
 
 
 
@@ -297,9 +342,14 @@ def _post(endpoint, data, push_type='alert', timeout=None):
         if resp.status_code == 200:
             result = resp.json()
             log.status = 'success'
-            log.records_count = len(data.get('alerts', []) or data.get('statuses', []) or data.get('inspections', []))
+            log.records_count = len(data.get('alerts', []) or data.get('statuses', []) or data.get('inspections', []) or data.get('results', []))
             log.save()
             logger.info(f'推送成功 [{push_type}/{endpoint}]: {result.get("message", "")}')
+
+            # 推送成功后，异步检查知识包版本和补丁版本
+            _deferred_knowledge_check()
+            _deferred_patch_check()
+
             return result
         else:
             log.status = 'failed'
@@ -365,6 +415,7 @@ def test_push():
         return {'success': False, 'message': '未配置API Key'}
 
     try:
+        full_url = f'{url.rstrip("/")}/api/receive/health/'
         session = get_http_session()
         resp = session.get(full_url, headers={"X-API-Key": api_key}, timeout=timeout)
         if resp.status_code == 200:
@@ -383,6 +434,77 @@ def test_push():
             return {'success': False, 'message': f'连接失败: {resp.status_code}'}
     except Exception as e:
         return {'success': False, 'message': f'连接异常: {e}'}
+
+
+def push_monitor_test_result(result_id):
+    """推送单条采集测试结果到 ops-center"""
+    from apps.monitoring.test_config import MonitorTestResult, MonitorTestConfig
+
+    try:
+        result = MonitorTestResult.objects.select_related('config').get(id=result_id)
+    except MonitorTestResult.DoesNotExist:
+        return None
+
+    config = result.config
+    from apps.assets.models import Asset
+    asset_qs = Asset.objects.filter(id=config.asset_id) if config.asset_id else None
+
+    payload = {
+        'results': [{
+            'remote_id': str(result.id),
+            'asset_name': asset_qs.first().asset_name if asset_qs and asset_qs.exists() else '',
+            'asset_ip': config.host or '',
+            'config_name': config.name,
+            'protocol': config.protocol or '',
+            'host': config.host or '',
+            'port': config.port or 0,
+            'status': result.status,
+            'error_message': result.error_message or '',
+            'response_time': result.response_time or 0,
+            'test_duration': result.test_duration or 0,
+            'test_data': result.data or {},
+            'version': result.data.get('version', ''),
+            'driver': result.data.get('driver', ''),
+            'executed_at': result.created_at.isoformat() if result.created_at else '',
+        }]
+    }
+    return _post('monitor-tests/', payload, push_type='monitor_test')
+
+
+def push_monitoring_data(data_points):
+    """
+    推送监控中心异常数据（severity >= 2）到 ops-center
+
+    Args:
+        data_points: list of dict，每个元素包含:
+            - remote_data_id: str (唯一标识，用于center去重)
+            - asset_name: str
+            - asset_ip: str
+            - asset_type: str
+            - check_item_code: str
+            - check_item_name: str
+            - protocol: str
+            - numeric_value: float or None
+            - display_value: str
+            - severity: int (2/3/4)
+            - result_message: str
+            - suggestion: str
+            - warning_threshold: str
+            - error_threshold: str
+            - recorded_at: str (ISO format)
+
+    Returns: dict or None
+    """
+    if not data_points:
+        return None
+
+    # 只推送非正常数据（severity >= 2）
+    abnormal = [dp for dp in data_points if dp.get('severity', 1) >= 2]
+    if not abnormal:
+        return None
+
+    payload = {'data_points': abnormal}
+    return _post('monitoring-data/', payload, push_type='monitoring_data')
 
 
 def push_ping_results(ping_results):
@@ -481,6 +603,12 @@ def push_inspection_result(task):
             'result_value': r.result_value,
             'result_message': r.result_message,
             'suggestion': r.suggestion,
+            'severity': r.severity,
+            'threshold': {
+                'expected': r.expected_value or '',
+                'min': r.threshold_min or '',
+                'max': r.threshold_max or '',
+            },
         })
 
     pass_count = sum(1 for r in results if r['status'] == 'pass')
@@ -681,3 +809,150 @@ def push_alerts(customer_id=None, alert_ids=None):
         return {'success': True, 'sent_count': len(alert_list), 'errors': []}
     else:
         return {'success': False, 'sent_count': 0, 'errors': ['推送失败']}
+
+
+# ==================== 心跳发送 ====================
+
+import threading
+_heartbeat_thread_started = False
+
+
+def send_heartbeat():
+    """向 ops-center 发送一次心跳"""
+    try:
+        enabled, url, api_key, timeout = get_config()
+        if not enabled or not url or not api_key:
+            logger.warning('心跳发送跳过: 推送未启用或未配置中心地址/API Key')
+            return False
+
+        import requests
+        resp = requests.post(
+            f'{url.rstrip("/")}/api/receive/heartbeat/',
+            json={'status': 'online', 'message': 'normal'},
+            headers={'X-API-Key': api_key, 'Content-Type': 'application/json'},
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            logger.info('心跳发送成功')
+            return True
+        else:
+            logger.warning(f'心跳发送失败: HTTP {resp.status_code} - {resp.text[:200]}')
+            return False
+    except Exception as e:
+        logger.error(f'心跳发送异常: {e}')
+        return False
+
+
+def _heartbeat_loop():
+    """后台心跳循环（每 5 分钟）"""
+    import time
+    while True:
+        try:
+            send_heartbeat()
+        except Exception as e:
+            logger.error(f'心跳循环异常: {e}')
+        time.sleep(300)  # 5 分钟
+
+
+def start_heartbeat():
+    """启动心跳后台线程（全局唯一）"""
+    global _heartbeat_thread_started
+    if _heartbeat_thread_started:
+        return
+    _heartbeat_thread_started = True
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+    logger.info('心跳后台线程已启动')
+
+
+# ==================== 知识包异步检查 ====================
+
+_ktime = 0  # 上次检查时间
+
+
+def _deferred_knowledge_check():
+    """
+    推送成功后异步检查知识包版本（每 60 秒最多一次）。
+    如果发现新版本，自动触发同步。
+    """
+    global _ktime
+    now = time.time()
+    if now - _ktime < 60:
+        return  # 限流：每分钟最多一次
+    _ktime = now
+
+    import threading
+
+    def _check():
+        try:
+            from apps.dashboard.knowledge_updater import check_and_update
+            result = check_and_update()
+            if result.get('updated'):
+                logger.info(f'知识包自动更新成功: {result.get("version")}')
+            elif result.get('success'):
+                logger.debug(f'知识包无需更新: {result.get("message", "")}')
+        except Exception as e:
+            logger.debug(f'知识包检查跳过: {e}')
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+
+
+# ==================== 补丁异步检查 ====================
+
+_ptime = 0  # 上次检查时间
+
+
+def _deferred_patch_check():
+    """
+    推送成功后异步检查补丁版本（每 5 分钟最多一次）。
+    如果发现新版本，打印日志提醒管理员。
+    """
+    global _ptime
+    now = time.time()
+    if now - _ptime < 300:
+        return
+    _ptime = now
+
+    import threading
+
+    def _check():
+        try:
+            from apps.system.models import SystemSetting
+            url = SystemSetting.get('push.center_url', '')
+            if not url:
+                return
+            import requests
+            center = f'{url.rstrip("/")}/api/collector/patches/'
+            resp = requests.get(center, timeout=5)
+            if resp.status_code == 200:
+                meta = resp.json()
+                ver_file = os.path.expanduser('~/.openclaw/patches/patch_version.txt')
+                local_ver = ''
+                if os.path.exists(ver_file):
+                    local_ver = open(ver_file).read().strip()
+                if meta.get('needs_update'):
+                    logger.warning(
+                        f'发现新补丁: {local_ver} → {meta["latest_version"]}'
+                    )
+                    logger.warning(f'更新内容: {meta.get("changelog", [])}')
+                    logger.warning(f'请运行: bash apply-patch.sh')
+                # 缓存检查结果供 dashboard 使用
+                try:
+                    cache_path = os.path.expanduser('~/.openclaw/patches/patch_check_cache.json')
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    with open(cache_path, 'w') as f:
+                        json.dump({
+                            'local_version': local_ver,
+                            'needs_update': meta.get('needs_update', False),
+                            'latest_version': meta['latest_version'],
+                            'changelog': meta.get('changelog', []),
+                            'checked_at': time.time(),
+                        }, f)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f'补丁检查跳过: {e}')
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
