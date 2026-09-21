@@ -51,3 +51,31 @@ htmlcov/
 
 # Virtual environments backup
 *.pyc
+
+# ============================================================
+# 运维/构建产物（2026-09-21 补充）
+# 说明：权威发布产物在 ops-center/backend/patches/（tar.gz + latest.json），
+#       本地这些都是可再生的中间物，不进版本库。
+# ============================================================
+
+# 补丁暂存目录（build_patch.py 产出，每个含一整份源码快照）
+patch_v*/
+patch_files/
+
+# 打包产物
+*.zip
+*.tar.gz
+*.tgz
+
+# 运行时数据 / 备份快照
+backend/backups/
+backend/data/
+*.sqlite3
+
+# 日志
+logs/
+nohup.out
+
+# 前端构建缓存
+frontend/.vite/
+.vite/
