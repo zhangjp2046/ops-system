@@ -68,6 +68,7 @@ class InspectionSkill(Skill):
     def _execute_plan_tasks(self, plan, force: bool = False):
         """
         执行计划下所有任务，使用线程池并发执行。
+        如果计划没有预先生成的任务，则自动根据资产的协议匹配创建任务。
         """
         from apps.inspection.models import InspectionTask
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -77,9 +78,33 @@ class InspectionSkill(Skill):
             plan_id=plan.id
         ).select_related('asset', 'plan', 'asset__customer'))
 
-
         if not all_tasks:
-            return [{'error': '计划没有关联任何巡检任务'}]
+            # 自动生成任务：按协议/asset_type_ids 匹配资产
+            from apps.assets.models import Asset
+            allowed_type_ids = plan.asset_type_ids or []
+            protocol = (plan.protocol or '').lower()
+            asset_qs = Asset.objects.all()
+            if allowed_type_ids:
+                asset_qs = asset_qs.filter(asset_type_id__in=allowed_type_ids)
+
+            matched = []
+            for asset in asset_qs.iterator():
+                asset_proto = (asset.protocol or '').lower()
+                asset_name = (asset.asset_name or '').lower()
+                if asset_proto == protocol or protocol in asset_name:
+                    matched.append(asset)
+
+            if not matched:
+                return [{'error': f'没有找到协议为 {protocol} 的资产'}]
+
+            for asset in matched:
+                all_tasks.append(InspectionTask.objects.create(
+                    plan=plan,
+                    asset=asset,
+                    scheduled_time=timezone.now(),
+                    priority='high',
+                    status='pending'
+                ))
 
         # 根据任务数动态调整线程池大小，最多20个并发
         max_workers = min(len(all_tasks), int(os.environ.get('INSPECTION_POOL_SIZE', '10')))
@@ -109,10 +134,10 @@ class InspectionSkill(Skill):
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(execute_single_task, task): task for task in all_tasks}
             for future in as_completed(futures):
+                task = futures[future]
                 try:
                     results.append(future.result())
                 except Exception as e:
-                    task = futures[future]
                     results.append({
                         'task_id': task.id,
                         'asset_name': task.asset.asset_name if task.asset else None,
