@@ -47,6 +47,21 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="设备类型" width="150">
+          <template #default="{ row }">
+            <div v-if="row.asset_type_names?.length">
+              <el-tag v-for="t in row.asset_type_names" :key="t.id" size="small" style="margin:1px">
+                {{ t.name }}
+              </el-tag>
+            </div>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="设备数" width="80">
+          <template #default="{ row }">
+            <el-tag type="primary" size="small">{{ row.asset_count || '-' }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="巡检项目" min-width="280">
           <template #default="{ row }">
             <div class="check-items-preview">
@@ -68,19 +83,6 @@
               </el-tooltip>
               <span v-if="extractCheckItems(row).length === 0" class="no-items">未配置</span>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="周期" width="70">
-          <template #default="{ row }">{{ row.cycle_display }}</template>
-        </el-table-column>
-        <el-table-column label="执行时间" width="80">
-          <template #default="{ row }">{{ row.scheduled_time }}</template>
-        </el-table-column>
-        <el-table-column label="自动" width="60" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.is_auto_execute ? 'success' : 'info'" size="small">
-              {{ row.is_auto_execute ? '是' : '否' }}
-            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="70">
@@ -148,39 +150,69 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="执行周期">
-              <el-select v-model="form.cycle" style="width:100%">
-                <el-option label="每天" value="daily" />
-                <el-option label="每周" value="weekly" />
-                <el-option label="每月" value="monthly" />
-                <el-option label="每季度" value="quarterly" />
-              </el-select>
-            </el-form-item>
-          </el-col>
+
         </el-row>
 
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="执行时间">
-              <el-time-picker v-model="form.scheduled_time" format="HH:mm" value-format="HH:mm:ss" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="自动执行">
-              <el-switch v-model="form.is_auto_execute" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="状态">
-              <el-select v-model="form.status" style="width:100%">
-                <el-option label="启用" value="active" />
-                <el-option label="草稿" value="draft" />
-                <el-option label="暂停" value="paused" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <!-- 设备类型选择（按协议筛选后） -->
+        <el-form-item label="设备类型" v-if="assetGroups.length > 0">
+          <div class="asset-type-select">
+            <div class="asset-type-header">
+              <el-checkbox
+                v-model="assetTypeAll"
+                :indeterminate="assetTypeIndeterminate"
+                @change="handleAssetTypeAll"
+              >
+                全选
+              </el-checkbox>
+              <span class="asset-type-count">
+                已选 <b>{{ selectedTypeIds.length }}</b> 个类型，共 <b>{{ selectedAssetCount }}</b> 台设备
+                <el-button link type="primary" size="small" style="margin-left:8px" @click="showSelectedAssets">
+                  查看设备清单
+                </el-button>
+              </span>
+            </div>
+            <div class="asset-type-grid">
+              <div
+                v-for="group in assetGroups"
+                :key="group.type_id"
+                class="asset-type-card"
+                :class="{ selected: selectedTypeIds.includes(group.type_id) }"
+                @click="toggleAssetType(group.type_id)"
+              >
+                <el-checkbox
+                  :model-value="selectedTypeIds.includes(group.type_id)"
+                  @click.stop
+                  @change="() => toggleAssetType(group.type_id)"
+                />
+                <div class="asset-type-body">
+                  <div class="asset-type-name">{{ group.type_name }}</div>
+                  <div class="asset-type-count-label">{{ group.asset_count }} 台设备</div>
+                </div>
+              </div>
+            </div>
+            <div v-if="assetGroups.length === 0" class="no-assets">
+              暂未加载资产数据
+            </div>
+          </div>
+        </el-form-item>
+
+        <!-- 设备清单弹窗 -->
+        <el-dialog v-model="assetDialogVisible" title="选中的设备清单" width="700px" append-to-body>
+          <el-table :data="selectedAssetsList" stripe size="small" max-height="400">
+            <el-table-column prop="name" label="资产名称" min-width="200" />
+            <el-table-column prop="asset_code" label="资产编号" width="120" />
+            <el-table-column prop="ip" label="IP地址" width="140" />
+            <el-table-column label="类型" width="120">
+              <template #default="{ row }">
+                {{ getAssetTypeName(row.type_id) }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <template #footer>
+            <span>共 <b>{{ selectedAssetsList.length }}</b> 台设备</span>
+            <el-button @click="assetDialogVisible = false">关闭</el-button>
+          </template>
+        </el-dialog>
 
         <!-- 巡检项目选择 -->
         <el-form-item label="巡检项目">
@@ -215,6 +247,16 @@
                   <div class="check-item-desc">{{ item.description }}</div>
                 </div>
               </div>
+            </div>
+            <!-- 时间同步告警阈值（仅勾选「时间同步」时显示） -->
+            <div v-if="selectedCodes.includes('TIME_SYNC')" class="time-sync-threshold">
+              <span class="ts-label">时间同步告警阈值：</span>
+              <el-radio-group v-model="timeSyncThreshold" size="small">
+                <el-radio-button :value="10">10 秒</el-radio-button>
+                <el-radio-button :value="60">60 秒</el-radio-button>
+                <el-radio-button :value="180">180 秒</el-radio-button>
+              </el-radio-group>
+              <span class="ts-hint">服务器时间与本机偏差超过该值即报警告</span>
             </div>
             <div v-if="availableChecks.length === 0" class="no-checks">
               请先选择协议类型
@@ -251,11 +293,109 @@ const assets = ref([])
 const categories = ref([])
 const selectedProtocol = ref(null)
 const checkItemsLoading = ref(false)
+const timeSyncThreshold = ref(60)          // 「时间同步」告警阈值（秒），选 10/60/180
+const TIME_SYNC_THRESHOLDS = [10, 60, 180] // 可选档位（1 秒档已撤：设备时间精度只到秒，1s 档必然误报）
+// 老计划可能存着旧档位（1/10/60），归一到当前可选档位，
+// 否则 el-radio-group 找不到匹配按钮会显示成「未选中」，提交时还会把失效值写回去
+function normalizeTimeSyncThreshold(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return 60
+  if (TIME_SYNC_THRESHOLDS.includes(n)) return n
+  return TIME_SYNC_THRESHOLDS.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a))
+}
+// 设备类型筛选
+const assetGroups = ref([])               // 按类型分组的资产数据
+const selectedTypeIds = ref([])           // 选中的类型ID列表
+const assetDialogVisible = ref(false)     // 设备清单弹窗
+
+// 全选状态
+const assetTypeAll = ref(false)
+const assetTypeIndeterminate = ref(false)
+
+// 计算选中的设备总数
+const selectedAssetCount = computed(() => {
+  return assetGroups.value
+    .filter(g => selectedTypeIds.value.includes(g.type_id))
+    .reduce((sum, g) => sum + g.asset_count, 0)
+})
+
+// 选中的设备清单（用于展示）
+const selectedAssetsList = computed(() => {
+  const list = []
+  for (const group of assetGroups.value) {
+    if (selectedTypeIds.value.includes(group.type_id)) {
+      for (const asset of group.assets) {
+        list.push({ ...asset, type_id: group.type_id, type_name: group.type_name })
+      }
+    }
+  }
+  return list
+})
+
+function updateAssetTypeState() {
+  const total = assetGroups.value.length
+  const selected = selectedTypeIds.value.length
+  assetTypeAll.value = total > 0 && selected === total
+  assetTypeIndeterminate.value = selected > 0 && selected < total
+}
+
+function handleAssetTypeAll(val) {
+  selectedTypeIds.value = val ? assetGroups.value.map(g => g.type_id) : []
+  updateAssetTypeState()
+}
+
+function toggleAssetType(typeId) {
+  const idx = selectedTypeIds.value.indexOf(typeId)
+  if (idx >= 0) {
+    selectedTypeIds.value.splice(idx, 1)
+  } else {
+    selectedTypeIds.value.push(typeId)
+  }
+  updateAssetTypeState()
+}
+
+function getAssetTypeName(typeId) {
+  const g = assetGroups.value.find(g => g.type_id === typeId)
+  return g ? g.type_name : ''
+}
+
+function showSelectedAssets() {
+  assetDialogVisible.value = true
+}
+
+// 加载某协议下的资产（按类型分组）
+async function loadAssetsByProtocol(protocol) {
+  if (!protocol) {
+    assetGroups.value = []
+    selectedTypeIds.value = []
+    return
+  }
+  try {
+    const res = await axios.get(`/api/inspection/plans/assets_by_protocol/?protocol=${protocol}`)
+    const body = res.data ?? res
+    const data = (body.data || body)
+    // data 可能是 { type_groups: [...] } 或直接是数组
+    if (data?.type_groups) {
+      assetGroups.value = data.type_groups
+    } else if (Array.isArray(data)) {
+      assetGroups.value = data
+    } else {
+      assetGroups.value = []
+    }
+    // 默认全选
+    selectedTypeIds.value = assetGroups.value.map(g => g.type_id)
+    updateAssetTypeState()
+  } catch (e) {
+    console.error('加载资产失败:', e)
+    assetGroups.value = []
+    selectedTypeIds.value = []
+  }
+}
 
 // 表单（只存基本字段，巡检项目用 selectedCodes）
 const form = reactive({
   name: '', code: '', description: '', protocol: 'mysql',
-  cycle: 'daily', scheduled_time: '09:00:00', is_auto_execute: true,
+
   status: 'active'
 })
 
@@ -369,6 +509,7 @@ async function loadCheckItems(protocol) {
 
 function handleProtocolChange(protocol) {
   loadCheckItems(protocol)
+  loadAssetsByProtocol(protocol)
   selectedCodes.value = []
 }
 
@@ -385,7 +526,7 @@ async function loadPlans() {
 
 async function loadAssets() {
   try {
-    const res = await axios.get('/api/assets/assets/', { params: { page_size: 100 } })
+    const res = await axios.get('/api/assets/assets/', { params: { page_size: 99999 } })
     const body = res.data ?? res
     assets.value = body.results || body.data?.results || extractArray(res)
   } catch { /* ignore */ }
@@ -398,10 +539,12 @@ async function showCreate() {
   editId.value = null
   Object.assign(form, {
     name: '', code: '', description: '', protocol: 'mysql',
-    cycle: 'daily', scheduled_time: '09:00:00', is_auto_execute: true,
+
     status: 'active'
   })
   await loadCheckItems('mysql')
+  await loadAssetsByProtocol('mysql')
+  timeSyncThreshold.value = 60          // 重置阈值，避免残留上一次的选择
   // 默认全选
   selectedCodes.value = availableChecks.value.map(c => c.code)
   updateCheckState()
@@ -418,21 +561,32 @@ async function showEdit(row) {
     code: row.code,
     description: row.description || '',
     protocol: row.protocol || 'mysql',
-    cycle: row.cycle || 'daily',
-    scheduled_time: row.scheduled_time || '09:00:00',
-    is_auto_execute: row.is_auto_execute ?? true,
+
     status: row.status || 'active'
   })
   // 先加载该协议的字典
   await loadCheckItems(form.protocol)
+  await loadAssetsByProtocol(form.protocol)
+  // 恢复设备类型选择
+  if (row.asset_type_ids?.length) {
+    selectedTypeIds.value = [...row.asset_type_ids]
+  } else {
+    selectedTypeIds.value = assetGroups.value.map(g => g.type_id)
+  }
+  updateAssetTypeState()
   // 再恢复已选中项（兼容对象数组和 code 数组）
   const existing = row.check_items || []
   if (existing.length > 0 && typeof existing[0] === 'object') {
     selectedCodes.value = existing.map(i => i.code)
+    // 回显「时间同步」阈值（老计划无该字段时默认 60s）
+    const ts = existing.find(i => i.code === 'TIME_SYNC')
+    timeSyncThreshold.value = normalizeTimeSyncThreshold(ts?.threshold)
   } else if (existing.length > 0 && typeof existing[0] === 'string') {
     selectedCodes.value = [...existing]
+    timeSyncThreshold.value = 60
   } else {
     selectedCodes.value = availableChecks.value.map(c => c.code)
+    timeSyncThreshold.value = 60
   }
   updateCheckState()
   dialogVisible.value = true
@@ -451,8 +605,13 @@ async function handleSubmit() {
       ...form,
       check_items: selectedCodes.value.map(code => {
         const item = availableChecks.value.find(c => c.code === code)
-        return { code, name: item?.name || code, method: item?.method || '', description: item?.description || '' }
-      })
+        const obj = { code, name: item?.name || code, method: item?.method || '', description: item?.description || '' }
+        // 「时间同步」带上用户选择的告警阈值（秒）
+        if (code === 'TIME_SYNC') obj.threshold = timeSyncThreshold.value
+        return obj
+      }),
+      asset_type_ids: selectedTypeIds.value,
+      asset_count: selectedAssetCount.value,
     }
 
     if (isEdit.value) {
@@ -479,9 +638,12 @@ async function handleSubmit() {
 async function executePlan(row) {
   row._executing = true
   try {
-    // 找到所有匹配协议的资产
+    // 找到所有匹配协议的资产（按设备类型过滤）
     const p = (row.protocol || '').toLowerCase()
+    const allowedTypeIds = (row.asset_type_ids || []).length ? row.asset_type_ids : null
     const matchedAssets = assets.value.filter(a => {
+      const typeId = a.asset_type ?? a.asset_type_id
+      if (allowedTypeIds && !allowedTypeIds.includes(typeId)) return false
       const name = (a.asset_name || '').toLowerCase()
       const proto = (a.protocol || '').toLowerCase()
       return proto === p || name.includes(p)
@@ -505,9 +667,9 @@ async function executePlan(row) {
         })
         const taskId = taskRes.id || taskRes.data?.id
 
-        // 执行巡检
+        // 执行巡检（数据库巡检可能超过30s，设120s超时）
         if (isDb) {
-          await axios.post(`/api/inspection/tasks/${taskId}/execute_db_inspection/`)
+          await axios.post(`/api/inspection/tasks/${taskId}/execute_db_inspection/`, {}, { timeout: 120000 })
         } else {
           await axios.post(`/api/inspection/tasks/${taskId}/execute/`)
         }
@@ -525,7 +687,7 @@ async function executePlan(row) {
   } finally { row._executing = false }
 }
 
-function viewResults(row) { router.push('/inspection/records') }
+function viewResults(row) { router.push('/inspection') }
 
 async function deletePlan(row) {
   await ElMessageBox.confirm('确定删除此计划?', '提示')
@@ -658,4 +820,86 @@ onMounted(() => {
   padding: 24px 0;
   font-size: 13px;
 }
+
+/* 时间同步告警阈值 */
+.time-sync-threshold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.time-sync-threshold .ts-label {
+  font-size: 13px;
+  color: #303133;
+  font-weight: 500;
+}
+.time-sync-threshold .ts-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 设备类型选择 */
+.asset-type-select {
+  width: 100%;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.asset-type-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ebeef5;
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  z-index: 1;
+}
+.asset-type-count { font-size: 13px; color: #909399; }
+.asset-type-count b { color: #409eff; }
+.asset-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+.asset-type-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1.5px solid #e4e7ed;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.asset-type-card:hover {
+  border-color: #409eff;
+  background: #f0f7ff;
+}
+.asset-type-card.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+.asset-type-body { flex: 1; min-width: 0; }
+.asset-type-name { font-size: 13px; font-weight: 600; color: #303133; }
+.asset-type-count-label { font-size: 11px; color: #909399; margin-top: 1px; }
+.no-assets {
+  text-align: center;
+  color: #c0c4cc;
+  padding: 16px 0;
+  font-size: 13px;
+}
+.text-muted { color: #c0c4cc; }
 </style>

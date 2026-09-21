@@ -8,6 +8,7 @@
 
 import os
 import sys
+import tempfile
 import subprocess
 import re
 from datetime import datetime
@@ -136,6 +137,12 @@ class MySQLConnector(BaseConnector):
             cur.execute(sql)
             return cur.fetchall()
 
+    def get_server_time(self):
+        """取数据库服务器当前时间（UTC epoch），用于时间同步检查。
+        只读查询，不需要任何写权限。"""
+        r = self.query('SELECT UNIX_TIMESTAMP(NOW(6)) AS EPOCH')
+        return {'epoch': _first_epoch(r)} if _first_epoch(r) is not None else {}
+
     def get_server_info(self):
         r = self.query('SELECT @@version AS version, @@version_comment AS comment, @@datadir AS datadir, @@basedir AS basedir, @@max_connections AS max_connections, @@wait_timeout AS wait_timeout')
         if not r: return {}
@@ -235,32 +242,68 @@ class MySQLConnector(BaseConnector):
 class MSSQLConnector(BaseConnector):
     """MSSQL 连接器（基于 FreeTDS tsql）"""
 
+    # TDS 版本优先级：7.4(MSSQL2012+) → 7.3(MSSQL2008/R2) → 7.2(MSSQL2005) → 7.1(MSSQL2000)
+    TDS_VERSIONS = ['7.4', '7.3', '7.2', '7.1']
+
     def __init__(self, config):
         super().__init__(config)
-        self._setup_freetds()
+        self._tds_version = None  # 连接成功后记录
+        self._setup_freetds_configs()
 
-    def _setup_freetds(self):
-        conf_path = '/tmp/freetds.conf'
-        if not os.path.exists(conf_path):
-            with open(conf_path, 'w') as f:
-                f.write('[global]\n    tds version = 7.4\n    encryption = off\n    client charset = UTF-8\n')
-        os.environ['FREETDSCONF'] = conf_path
+    def _setup_freetds_configs(self):
+        """为所有 TDS 版本创建配置文件"""
+        for tds_ver in self.TDS_VERSIONS:
+            conf_path = f'/tmp/freetds_{tds_ver}.conf'
+            if not os.path.exists(conf_path):
+                with open(conf_path, 'w') as f:
+                    f.write(f'[global]\n    tds version = {tds_ver}\n    encryption = off\n    client charset = UTF-8\n')
 
     def connect(self):
-        # tsql 无持久连接，每次查询都连接
-        self.connected = True
+        """自动检测可用的 TDS 版本"""
+        if self._tds_version:
+            self.connected = True
+            return
+
+        for tds_ver in self.TDS_VERSIONS:
+            conf_path = f'/tmp/freetds_{tds_ver}.conf'
+            cmd = (f'TDSVER={tds_ver} tsql -H {self.config["host"]} '
+                   f'-p {self.config.get("port", 1433)} '
+                   f'-U {self.config["username"]} -P "{self.config["password"]}" '
+                   f'-D {self.config.get("database", "master")}')
+            try:
+                proc = subprocess.Popen(
+                    cmd, shell=True, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    env={**os.environ, 'FREETDSCONF': conf_path}
+                )
+                stdout, _ = proc.communicate(
+                    input="SELECT @@VERSION AS v\nGO\n", timeout=10
+                )
+                if 'Microsoft SQL Server' in stdout or 'Adaptive Server' in stdout:
+                    self._tds_version = tds_ver
+                    self._tds_conf = conf_path
+                    self.connected = True
+                    return
+            except Exception:
+                continue
+
+        self.connected = False
+        raise ConnectionError(f'MSSQL 连接失败: 所有 TDS 版本均无法连接')
 
     def disconnect(self):
         self.connected = False
 
     def query(self, sql):
-        cmd = f'TDSVER=7.4 tsql -H {self.config["host"]} -p {self.config.get("port", 1433)} ' \
-              f'-U {self.config["username"]} -P "{self.config["password"]}" ' \
-              f'-D {self.config.get("database", "master")}'
+        if not self._tds_version:
+            self.connect()
+        cmd = (f'TDSVER={self._tds_version} tsql -H {self.config["host"]} '
+               f'-p {self.config.get("port", 1433)} '
+               f'-U {self.config["username"]} -P "{self.config["password"]}" '
+               f'-D {self.config.get("database", "master")}')
         proc = subprocess.Popen(
             cmd, shell=True, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env={**os.environ, 'FREETDSCONF': '/tmp/freetds.conf'}
+            env={**os.environ, 'FREETDSCONF': self._tds_conf}
         )
         stdout, _ = proc.communicate(input=f'{sql}\nGO\n')
         return self._parse_tsql_output(stdout)
@@ -280,25 +323,35 @@ class MSSQLConnector(BaseConnector):
             clean.append(s)
         if len(clean) < 2: return results
         header = clean[0]
-        if '\t' not in header: return results
-        headers = header.split('\t')
+        # 尝试 tab 分割，回退空格分割（兼容不同 tsql 输出格式）
+        if '\t' in header:
+            headers = [h for h in header.split('\t') if h]  # 过滤空字符串（FreeTDS 多 tab 对齐）
+        else:
+            # 空格分割：如果第一行全是英文字母（无数字），视为表头
+            if re.match(r'^[a-zA-Z_ /()]+$', header):
+                headers = header.split()
+            else:
+                return results
         num_cols = len(headers)
+        use_tabs = '\t' in header  # 记录该查询的输出是 tab 分隔还是空格分隔
         merged = []
         current = []
         for line in clean[1:]:
-            parts = line.split('\t')
+            parts = [p for p in (line.split('\t') if use_tabs else line.split()) if p]  # 过滤空字符串（多 tab 对齐）
+            # 如果过滤后列数不够，尝试不过滤（兼容某些值可能为空的场景）
+            if len(parts) < num_cols:
+                parts2 = line.split('\t') if use_tabs else line.split()
+                if len(parts2) >= num_cols:
+                    parts = parts2[:num_cols]
             if not current:
-                # 新行开始
                 current = parts
-            elif '\t' in line and len(current) >= num_cols:
-                # 当前行够了 + 新行有 tab = 新数据行
+            elif (use_tabs and '\t' in line and len(current) >= num_cols) \
+                 or (not use_tabs and len(line.split()) == num_cols and len(current) >= num_cols):
                 merged.append(current[:num_cols])
                 current = parts
-            elif '\t' in line:
-                # 有 tab 但当前行不够，追加列
+            elif use_tabs and '\t' in line:
                 current.extend(parts)
             else:
-                # 无 tab，追加到最后一列（处理 @@VERSION 等多行值）
                 if current:
                     current[-1] += '\n' + line
         if current:
@@ -313,6 +366,21 @@ class MSSQLConnector(BaseConnector):
             results.append(dict(zip(headers, row)))
         return results
 
+    def get_server_time(self):
+        """取数据库服务器当前时间（UTC epoch）。
+        DATEDIFF_BIG 需要 SQL Server 2016+，不支持时回退到秒级 DATEDIFF。"""
+        for sql in (
+            "SELECT DATEDIFF_BIG(MILLISECOND, '19700101', SYSUTCDATETIME()) / 1000.0 AS EPOCH",
+            "SELECT CONVERT(BIGINT, DATEDIFF(SECOND, '19700101', GETUTCDATE())) AS EPOCH",
+        ):
+            try:
+                epoch = _first_epoch(self.query(sql))
+            except Exception:
+                continue
+            if epoch is not None:
+                return {'epoch': epoch}
+        return {}
+
     def get_server_info(self):
         r = self.query('SELECT @@VERSION AS version, @@SERVERNAME AS server_name, @@MAX_CONNECTIONS AS max_connections')
         if not r: return {}
@@ -324,26 +392,39 @@ class MSSQLConnector(BaseConnector):
         return self.query("SELECT name, state_desc AS state, recovery_model_desc AS recovery_model FROM sys.databases ORDER BY name")
 
     def get_database_sizes(self):
-        """获取每个数据库的数据文件和日志文件大小"""
-        return self.query("""
-            SELECT DB_NAME(database_id) AS database_name,
-                   type_desc AS file_type,
-                   name AS file_name,
-                   physical_name,
-                   CAST(size * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb,
-                   CAST(FILEPROPERTY(name, 'SpaceUsed') * 8.0 / 1024 AS DECIMAL(10,2)) AS used_mb
-            FROM sys.master_files
-            ORDER BY database_id, type
-        """)
+        """获取每个数据库的数据文件和日志文件大小（分别聚合）"""
+        try:
+            return self.query("""
+                SELECT DB_NAME(database_id) AS database_name,
+                       SUM(CASE WHEN type=0 THEN CAST(size AS BIGINT) ELSE 0 END)*8/1024 AS data_size_mb,
+                       SUM(CASE WHEN type=1 THEN CAST(size AS BIGINT) ELSE 0 END)*8/1024 AS log_size_mb
+                FROM sys.master_files
+                GROUP BY database_id
+                ORDER BY database_name
+            """)
+        except Exception:
+            pass
+        # 回退：如果上面报错，尝试不 CAST 的版本
+        try:
+            return self.query("""
+                SELECT DB_NAME(database_id) AS database_name,
+                       SUM(CASE WHEN type=0 THEN size ELSE 0 END)*8/1024 AS data_size_mb,
+                       SUM(CASE WHEN type=1 THEN size ELSE 0 END)*8/1024 AS log_size_mb
+                FROM sys.master_files
+                GROUP BY database_id
+                ORDER BY database_name
+            """)
+        except Exception:
+            return []
 
     def get_tablespace_info(self):
         return self.query("""
             SELECT DB_NAME(database_id) AS database_name,
-                   type_desc AS file_type,
+                   CASE WHEN type = 0 THEN 'ROWS' WHEN type = 1 THEN 'LOG' ELSE 'OTHER' END AS file_type,
                    CAST(SUM(size) * 8.0 / 1024 AS DECIMAL(10,2)) AS total_size_mb,
                    COUNT(*) AS file_count
             FROM sys.master_files
-            GROUP BY database_id, type_desc
+            GROUP BY database_id, type
             ORDER BY database_id, type
         """)
 
@@ -365,7 +446,7 @@ class MSSQLConnector(BaseConnector):
 
     def get_performance_info(self):
         try:
-            hit = self.query("SELECT TOP 1 cntr_value AS val FROM sys.dm_os_performance_counters WHERE counter_name = 'Buffer cache hit ratio' AND cntr_type = 65792")
+            hit = self.query("SELECT TOP 1 cntr_value AS val FROM sys.dm_os_performance_counters WHERE counter_name = 'Buffer cache hit ratio'")
             ple = self.query("SELECT TOP 1 cntr_value AS val FROM sys.dm_os_performance_counters WHERE counter_name = 'Page life expectancy' AND object_name LIKE '%Manager%'")
             batch = self.query("SELECT TOP 1 cntr_value AS val FROM sys.dm_os_performance_counters WHERE counter_name = 'Batch Requests/sec' AND cntr_type = 272696576")
             mem = self.query("SELECT TOP 1 cntr_value / 1024 AS val FROM sys.dm_os_performance_counters WHERE counter_name = 'Total Server Memory (KB)'")
@@ -375,8 +456,8 @@ class MSSQLConnector(BaseConnector):
                 'batch_requests_per_sec': int(batch[0]['val']) if batch else 0,
                 'total_server_memory_mb': int(mem[0]['val']) if mem else 0,
             }
-        except Exception as e:
-            return {'error': str(e)}
+        except Exception:
+            return {}
 
     def get_backup_info(self):
         try:
@@ -393,9 +474,11 @@ class MSSQLConnector(BaseConnector):
             return []
 
     def get_error_logs(self):
-        """MSSQL 错误日志（通过 sp_readerrorlog）"""
+        """MSSQL 错误日志（通过 sp_readerrorlog，最近7天）"""
         try:
-            return self.query("EXEC xp_readerrorlog 0, 1, N'Error'")
+            from datetime import datetime, timedelta
+            date_filter = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            return self.query(f"EXEC xp_readerrorlog 0, 1, N'Error', NULL, NULL, NULL, N'{date_filter}'")
         except:
             return []
 
@@ -432,53 +515,125 @@ class OracleConnector(BaseConnector):
         super().__init__(config)
 
     def connect(self):
-        # Oracle 用 sqlplus 命令行
-        self.connected = True
+        # Oracle 用 sqlplus 命令行，先检查 sqlplus 是否存在
+        sqlplus_path = subprocess.run(
+            ['which', 'sqlplus'], capture_output=True, text=True
+        ).stdout.strip()
+        if not sqlplus_path:
+            self.connected = False
+            raise ConnectionError('Oracle 连接失败: sqlplus 命令未安装')
+        dsn = f'{self.config["username"]}/{self.config["password"]}@{self.config["host"]}:{self.config.get("port", 1521)}/{self.config.get("database", "ORCL")}'
+        env = os.environ.copy()
+        env['NLS_LANG'] = 'AMERICAN_AMERICA.AL32UTF8'
+        sql = 'SET PAGESIZE 0 FEEDBACK OFF VERIFY OFF\nSELECT 1 FROM DUAL;\nEXIT\n'
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+            f.write(sql)
+            sqlfile = f.name
+        try:
+            proc = subprocess.run(
+                ['sqlplus', '-S', dsn, f'@{sqlfile}'],
+                capture_output=True, text=True, timeout=10, env=env
+            )
+            if proc.returncode != 0 or 'ORA-' in proc.stdout:
+                self.connected = False
+                raise ConnectionError(f'Oracle 连接失败: {proc.stderr or proc.stdout}'[:200])
+            self.connected = True
+        finally:
+            os.unlink(sqlfile)
 
     def disconnect(self):
         self.connected = False
 
     def query(self, sql):
-        """使用 sqlplus 执行查询"""
+        """使用 sqlplus 执行查询（通过临时 SQL 文件，防 EXIT 干扰）"""
+        import tempfile
         dsn = f'{self.config["username"]}/{self.config["password"]}@{self.config["host"]}:{self.config.get("port", 1521)}/{self.config.get("database", "ORCL")}'
-        # 设置 SQL*Plus 环境
         env_cmds = [
-            'SET PAGESIZE 0 FEEDBACK OFF VERIFY OFF HEADING OFF ECHO OFF',
+            'SET PAGESIZE 1000 FEEDBACK OFF VERIFY OFF HEADING ON ECHO OFF',
             'SET COLSEP |',
             'SET LINESIZE 4000',
             'SET TRIMSPOOL ON',
         ]
-        full_sql = '\n'.join(env_cmds) + '\n' + sql + '\nEXIT;'
-        proc = subprocess.Popen(
-            f'sqlplus -S {dsn}',
-            shell=True, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        stdout, stderr = proc.communicate(input=full_sql)
-        return self._parse_sqlplus_output(stdout)
+        full_sql = '\n'.join(env_cmds) + '\n' + sql.rstrip(';') + ';\nEXIT;'
+        env = {**os.environ, 'NLS_LANG': 'AMERICAN_AMERICA.AL32UTF8'}
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+            f.write(full_sql)
+            sqlfile = f.name
+        try:
+            proc = subprocess.run(
+                ['sqlplus', '-S', dsn, f'@{sqlfile}'],
+                capture_output=True, text=True, timeout=15, env=env
+            )
+            return self._parse_sqlplus_output(proc.stdout)
+        except subprocess.TimeoutExpired:
+            return []
+        finally:
+            try:
+                os.unlink(sqlfile)
+            except:
+                pass
 
     def _parse_sqlplus_output(self, stdout):
+        """
+        解析 sqlplus 输出（HEADING ON + COLSEP | 格式）
+        第一行=表头，第二行=分隔线（---），之后=数据行
+        """
         results = []
         lines = stdout.strip().split('\n')
+        if not lines:
+            return results
         clean = []
         for line in lines:
             s = line.strip()
-            if not s: continue
-            if s.startswith('Connected') or s.startswith('SQL>') or s.startswith('ORA-'): continue
+            if not s:
+                continue
+            # 过滤 sqlplus 系统消息
+            if s.startswith('Connected') or s.startswith('SQL>') or s.startswith('Disconnected'):
+                continue
+            # 过滤错误行
+            if re.match(r'^ORA-', s) or re.match(r'^SP2-', s) or s.startswith('ERROR'):
+                continue
+            # 过滤分隔线（---）
+            if re.match(r'^[-]+$', s) or all(c in '-+| ' for c in s):
+                continue
             clean.append(s)
-        if len(clean) < 2: return results
+        if not clean:
+            return results
         # 第一行是表头
         headers = [h.strip() for h in clean[0].split('|')]
         for data_line in clean[1:]:
             values = [v.strip() for v in data_line.split('|')]
             if len(values) == len(headers):
                 results.append(dict(zip(headers, values)))
+            elif len(values) > 1:
+                # 补齐或截断
+                if len(values) < len(headers):
+                    values += [''] * (len(headers) - len(values))
+                else:
+                    values = values[:len(headers)]
+                results.append(dict(zip(headers, values)))
         return results
+
+    def get_server_time(self):
+        """取数据库服务器当前时间（UTC epoch）。
+        SYS_EXTRACT_UTC 保证不受数据库/会话时区影响。"""
+        r = self.query(
+            "SELECT (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) "
+            "- TO_DATE('19700101','YYYYMMDD')) * 86400 AS EPOCH FROM DUAL")
+        epoch = _first_epoch(r)
+        return {'epoch': epoch} if epoch is not None else {}
 
     def get_server_info(self):
         try:
             r = self.query("SELECT banner AS version FROM v$version WHERE ROWNUM = 1")
             inst = self.query("SELECT instance_name, status, database_status, startup_time FROM v$instance")
+            # 调试：打印原始数据
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'[OracleInspect] v$version raw: {r}')
+            logger.warning(f'[OracleInspect] v$instance raw: {inst}')
+            logger.warning(f'[OracleInspect] v$version keys: {r[0].keys() if r else "empty"}')
+            logger.warning(f'[OracleInspect] v$instance keys: {inst[0].keys() if inst else "empty"}')
             return {
                 'version': r[0]['VERSION'] if r else '',
                 'instance_name': inst[0]['INSTANCE_NAME'] if inst else '',
@@ -486,39 +641,73 @@ class OracleConnector(BaseConnector):
                 'database_status': inst[0]['DATABASE_STATUS'] if inst else '',
                 'startup_time': inst[0]['STARTUP_TIME'] if inst else '',
             }
-        except:
-            return {}
+        except Exception as e:
+            raise ConnectionError(f'查询 v$instance 失败: {e}')
 
     def get_databases(self):
         """Oracle 只有一个实例，返回表空间信息"""
         try:
             return self.query("SELECT tablespace_name AS name, status, contents FROM dba_tablespaces ORDER BY tablespace_name")
         except:
-            return []
+            try:
+                return self.query("SELECT name AS name, DECODE(BITAND(flags, 1), 0, 'ONLINE', 'OFFLINE') AS status FROM v$tablespace ORDER BY name")
+            except:
+                return []
 
     def get_database_sizes(self):
-        """获取表空间大小"""
-        return self.query("""
-            SELECT tablespace_name,
-                   ROUND(SUM(bytes) / 1024 / 1024, 2) AS total_size_mb,
-                   COUNT(*) AS file_count
-            FROM dba_data_files
-            GROUP BY tablespace_name
-            ORDER BY total_size_mb DESC
-        """)
+        """获取表空间大小（优先 dba_data_files，失败用 v$datafile）"""
+        try:
+            return self.query("""
+                SELECT tablespace_name,
+                       ROUND(SUM(bytes) / 1024 / 1024, 2) AS total_size_mb,
+                       COUNT(*) AS file_count
+                FROM dba_data_files
+                GROUP BY tablespace_name
+                ORDER BY total_size_mb DESC
+            """)
+        except:
+            try:
+                return self.query("""
+                    SELECT t.name AS tablespace_name,
+                           ROUND(SUM(d.bytes) / 1024 / 1024, 2) AS total_size_mb,
+                           COUNT(*) AS file_count
+                    FROM v$tablespace t, v$datafile d
+                    WHERE t.ts# = d.ts#
+                    GROUP BY t.name
+                    ORDER BY t.name
+                """)
+            except:
+                return []
 
     def get_tablespace_info(self):
-        return self.query("""
-            SELECT df.tablespace_name,
-                   ROUND(df.total_mb, 2) AS total_mb,
-                   ROUND(df.total_mb - NVL(fs.free_mb, 0), 2) AS used_mb,
-                   ROUND(NVL(fs.free_mb, 0), 2) AS free_mb,
-                   ROUND((df.total_mb - NVL(fs.free_mb, 0)) / df.total_mb * 100, 2) AS used_pct
-            FROM (SELECT tablespace_name, SUM(bytes) / 1024 / 1024 AS total_mb FROM dba_data_files GROUP BY tablespace_name) df
-            LEFT JOIN (SELECT tablespace_name, SUM(bytes) / 1024 / 1024 AS free_mb FROM dba_free_space GROUP BY tablespace_name) fs
-            ON df.tablespace_name = fs.tablespace_name
-            ORDER BY used_pct DESC
-        """)
+        """表空间使用率（优先 dba，失败用 v$datafile）"""
+        try:
+            return self.query("""
+                SELECT df.tablespace_name,
+                       ROUND(df.total_mb, 2) AS total_mb,
+                       ROUND(df.total_mb - NVL(fs.free_mb, 0), 2) AS used_mb,
+                       ROUND(NVL(fs.free_mb, 0), 2) AS free_mb,
+                       ROUND((df.total_mb - NVL(fs.free_mb, 0)) / df.total_mb * 100, 2) AS used_pct
+                FROM (SELECT tablespace_name, SUM(bytes) / 1024 / 1024 AS total_mb FROM dba_data_files GROUP BY tablespace_name) df
+                LEFT JOIN (SELECT tablespace_name, SUM(bytes) / 1024 / 1024 AS free_mb FROM dba_free_space GROUP BY tablespace_name) fs
+                ON df.tablespace_name = fs.tablespace_name
+                ORDER BY used_pct DESC
+            """)
+        except:
+            try:
+                return self.query("""
+                    SELECT t.name AS tablespace_name,
+                           ROUND(SUM(d.bytes) / 1024 / 1024, 2) AS total_mb,
+                           'N/A' AS used_mb,
+                           'N/A' AS free_mb,
+                           'N/A' AS used_pct
+                    FROM v$tablespace t, v$datafile d
+                    WHERE t.ts# = d.ts#
+                    GROUP BY t.name
+                    ORDER BY t.name
+                """)
+            except:
+                return []
 
     def get_session_info(self):
         sessions = self.query("""
@@ -573,13 +762,15 @@ class OracleConnector(BaseConnector):
             return []
 
     def get_error_logs(self):
-        """Oracle alert log 中的 ORA- 错误"""
+        """Oracle alert log 中的 ORA- 错误（最近100条）"""
         try:
             return self.query("""
-                SELECT originating_timestamp, message_text
-                FROM v$diag_alert_ext
-                WHERE message_text LIKE 'ORA-%'
-                ORDER BY originating_timestamp DESC
+                SELECT * FROM (
+                    SELECT originating_timestamp, message_text
+                    FROM v$diag_alert_ext
+                    WHERE message_text LIKE 'ORA-%'
+                    ORDER BY originating_timestamp DESC
+                ) WHERE ROWNUM < 100
             """)
         except:
             return []
@@ -599,17 +790,23 @@ class OracleConnector(BaseConnector):
             """)
             # 归档目标使用率
             dest = self.query("""
-                SELECT destination,
-                       ROUND(space_used / 1024 / 1024, 2) AS used_mb,
-                       ROUND(space_limit / 1024 / 1024, 2) AS limit_mb,
-                       ROUND(space_used / space_limit * 100, 2) AS used_pct
+                SELECT name AS DESTINATION,
+                       ROUND(space_used / 1024 / 1024, 2) AS USED_MB,
+                       ROUND(space_limit / 1024 / 1024, 2) AS LIMIT_MB,
+                       ROUND(space_used / space_limit * 100, 2) AS USED_PCT
                 FROM v$recovery_file_dest
             """)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'[OracleArch] usage rows={len(usage)}, dest rows={len(dest)}, dest_data={dest}')
             return {
-                'archive_logs': usage[:20],  # 最近20个
+                'archive_logs': usage[:20],
                 'recovery_dest': dest[0] if dest else {}
             }
-        except:
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'[OracleArch] 异常: {e}')
             return {'archive_logs': [], 'recovery_dest': {}}
 
     def get_lock_info(self):
@@ -623,17 +820,19 @@ class OracleConnector(BaseConnector):
         """)
 
     def get_slow_queries(self):
-        """获取最耗资源的 SQL"""
+        """获取最耗资源的 SQL（Top 50）"""
         try:
             return self.query("""
-                SELECT sql_id, executions,
-                       ROUND(elapsed_time / 1000000, 2) AS total_seconds,
-                       ROUND(elapsed_time / executions / 1000000, 4) AS avg_seconds,
-                       ROUND(buffer_gets / executions) AS avg_buffer_gets,
-                       SUBSTR(sql_text, 1, 200) AS sql_text
-                FROM v$sql
-                WHERE executions > 0
-                ORDER BY elapsed_time DESC
+                SELECT * FROM (
+                    SELECT sql_id, executions,
+                           ROUND(elapsed_time / 1000000, 2) AS total_seconds,
+                           ROUND(elapsed_time / executions / 1000000, 4) AS avg_seconds,
+                           ROUND(buffer_gets / executions) AS avg_buffer_gets,
+                           SUBSTR(sql_text, 1, 200) AS sql_text
+                    FROM v$sql
+                    WHERE executions > 0
+                    ORDER BY elapsed_time DESC
+                ) WHERE ROWNUM < 50
             """)
         except:
             return []
@@ -665,20 +864,28 @@ def get_connector_from_asset(asset):
         'database': database,
         'username': username,
         'password': password,
-        'db_type': _get_field(asset, 'database_type') or (asset.db_type.upper() if asset.db_type else 'MYSQL'),
+        'db_type': _get_field(asset, 'database_type') or (asset.db_type.upper() if asset.db_type else ''),
     }
 
-    # 自动判断类型
-    name = asset.asset_name.lower()
-    if 'mssql' in name or 'sql server' in name:
-        config['db_type'] = 'MSSQL'
+    # 如果 database_type 字段为空，才从资产名猜测
+    if not config['db_type']:
+        name = asset.asset_name.lower()
+        if 'mssql' in name or 'sql server' in name:
+            config['db_type'] = 'MSSQL'
+        elif 'oracle' in name:
+            config['db_type'] = 'ORACLE'
+        elif 'mysql' in name or 'mariadb' in name:
+            config['db_type'] = 'MYSQL'
+        else:
+            config['db_type'] = 'MYSQL'
+
+    # 设置默认端口和数据库名
+    if config['db_type'] == 'MSSQL':
         if not config['port']: config['port'] = '1433'
         if not config['database']: config['database'] = 'master'
-    elif 'oracle' in name:
-        config['db_type'] = 'ORACLE'
+    elif config['db_type'] == 'ORACLE':
         if not config['port']: config['port'] = '1521'
-    elif 'mysql' in name or 'mariadb' in name:
-        config['db_type'] = 'MYSQL'
+    elif config['db_type'] == 'MYSQL':
         if not config['port']: config['port'] = '3306'
         if not config['database']: config['database'] = 'mysql'
 
@@ -695,11 +902,28 @@ def _get_field(asset, field_code):
 
 # ========== 巡检模板定义 ==========
 
+def _first_epoch(rows):
+    """从 SQL 查询结果里取第一个值并转 float。
+
+    各引擎结果形态不一（MySQL DictCursor 得 dict、MSSQL tsql 文本解析、Oracle
+    sqlplus COLSEP 解析），列名大小写也不保证，所以取「首行的首个值」最稳。
+    """
+    if not rows:
+        return None
+    try:
+        row = rows[0]
+        val = list(row.values())[0] if isinstance(row, dict) else row[0]
+        return float(val)
+    except (TypeError, ValueError, IndexError, KeyError, AttributeError):
+        return None
+
+
 INSPECTION_TEMPLATES = {
     'MYSQL': {
         'name': 'MySQL 巡检',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info'},
             {'code': 'DB_SIZE', 'name': '数据库大小', 'method': 'get_database_sizes'},
             {'code': 'SESSIONS', 'name': '会话信息', 'method': 'get_session_info'},
@@ -713,6 +937,7 @@ INSPECTION_TEMPLATES = {
         'name': 'MSSQL 巡检',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info'},
             {'code': 'DB_LIST', 'name': '数据库列表', 'method': 'get_databases'},
             {'code': 'DB_SIZE', 'name': '数据库文件大小', 'method': 'get_database_sizes'},
@@ -727,6 +952,7 @@ INSPECTION_TEMPLATES = {
         'name': 'Oracle 巡检',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info'},
             {'code': 'TABLESPACE', 'name': '表空间使用率', 'method': 'get_tablespace_info'},
             {'code': 'DB_SIZE', 'name': '数据文件大小', 'method': 'get_database_sizes'},

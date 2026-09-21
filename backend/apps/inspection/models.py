@@ -28,6 +28,7 @@ class InspectionPlan(models.Model):
         ('ssh', 'SSH'),
         ('ping', 'Ping'),
         ('port', '端口检测'),
+        ('ntp', 'NTP时间同步'),
     ]
     
     # 关联客户
@@ -55,6 +56,10 @@ class InspectionPlan(models.Model):
     
     # 巡检项目（JSON配置）
     check_items = models.JSONField('巡检项目配置', default=list, blank=True)
+    
+    # 选中的设备类型和数量（创建时指定）
+    asset_type_ids = models.JSONField('设备类型ID列表', default=list, blank=True)
+    asset_count = models.IntegerField('设备数量', default=0)
     
     # 时间戳
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
@@ -162,7 +167,10 @@ class InspectionResult(models.Model):
     
     # 建议
     suggestion = models.TextField('处理建议', blank=True)
-    
+
+    # 严重程度（1=信息 2=警告 3=错误 4=严重），由阈值配置计算得出
+    severity = models.IntegerField('严重程度', default=1)
+
     # 执行时间
     executed_at = models.DateTimeField('执行时间', auto_now_add=True)
     
@@ -229,3 +237,86 @@ class InspectionRecord(models.Model):
     
     def __str__(self):
         return f'{self.asset.asset_name} - {self.created_at.strftime("%Y-%m-%d %H:%M")}'
+
+
+# ============ 模板模型（供 run_auto_inspection 使用）===========
+
+class InspectionTemplate(models.Model):
+    """巡检模板"""
+    name = models.CharField('模板名称', max_length=200)
+    description = models.TextField('描述', blank=True)
+    inspection_type = models.CharField('巡检类型', max_length=50, default='SNMP')
+    asset_type = models.CharField('资产类型', max_length=50, blank=True)
+    items = models.JSONField('巡检项目', default=list, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        db_table = 'inspection_templates'
+        verbose_name = '巡检模板'
+
+    def __str__(self):
+        return self.name
+
+
+# ============ 兼容层：供 executor.py 使用 ============
+# executor.py 期望 Inspection 和 InspectionItem 模型，
+# 但实际代码用的是 InspectionRecord / InspectionResult
+# 这里创建兼容模型供调度执行器使用
+
+class Inspection(models.Model):
+    """巡检记录（兼容 executor.py）"""
+    STATUS_CHOICES = [
+        ('RUNNING', '运行中'),
+        ('COMPLETED', '已完成'),
+        ('FAILED', '失败'),
+    ]
+    name = models.CharField('巡检名称', max_length=200)
+    description = models.TextField('描述', blank=True)
+    inspection_type = models.CharField('巡检类型', max_length=50, default='SNMP')
+    customer = models.ForeignKey('customers.Customer', on_delete=models.SET_NULL, null=True, blank=True)
+    asset = models.ForeignKey('assets.Asset', on_delete=models.CASCADE, null=True, blank=True)
+    asset_type = models.CharField('资产类型', max_length=50, blank=True)
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='RUNNING')
+    started_at = models.DateTimeField('开始时间', null=True, blank=True)
+    completed_at = models.DateTimeField('完成时间', null=True, blank=True)
+    total_items = models.IntegerField('总检查项', default=0)
+    passed_items = models.IntegerField('通过项', default=0)
+    warning_items = models.IntegerField('警告项', default=0)
+    failed_items = models.IntegerField('失败项', default=0)
+    duration_ms = models.IntegerField('耗时(ms)', default=0)
+    summary = models.TextField('总结', blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        db_table = 'inspections'
+        verbose_name = '巡检记录'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+
+class InspectionItem(models.Model):
+    """巡检项目结果（兼容 executor.py）"""
+    RESULT_CHOICES = [
+        ('PASS', '通过'),
+        ('WARNING', '警告'),
+        ('FAIL', '失败'),
+    ]
+    inspection = models.ForeignKey(Inspection, on_delete=models.CASCADE, related_name='items')
+    item_code = models.CharField('检查项编码', max_length=50)
+    item_name = models.CharField('检查项名称', max_length=100)
+    category = models.CharField('类别', max_length=50)
+    result = models.CharField('结果', max_length=10, choices=RESULT_CHOICES, default='PASS')
+    severity = models.CharField('严重程度', max_length=20, default='OK')
+    actual_value = models.CharField('实际值', max_length=500, blank=True)
+    expected_value = models.CharField('期望值', max_length=500, blank=True)
+    message = models.TextField('消息', blank=True)
+    details = models.JSONField('详细信息', default=dict, blank=True)
+
+    class Meta:
+        db_table = 'inspection_items'
+        verbose_name = '巡检项目'
+
+    def __str__(self):
+        return f'{self.item_name}({self.result})'

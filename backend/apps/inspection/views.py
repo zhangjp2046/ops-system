@@ -40,12 +40,14 @@ class InspectionPlanViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(protocol=protocol_filter)
         return queryset
 
-    @action(detail=False, methods=['get'])
     def perform_destroy(self, instance):
         """删除前先解除调度计划的关联，避免外键约束"""
         from apps.scheduler_v2.models import Plan
         # 先把关联的调度计划指向 null，再删除巡检计划
-        Plan.objects.filter(inspection_plan=instance).update(inspection_plan=None, inspection_plan_name=None)
+        Plan.objects.filter(inspection_plan=instance).update(
+            inspection_plan=None,
+            inspection_plan_name=''
+        )
         instance.delete()
 
     def protocols(self, request):
@@ -144,28 +146,28 @@ class InspectionPlanViewSet(viewsets.ModelViewSet):
         plan_id = instance.id
         with connection.cursor() as c:
             # 按依赖顺序从叶子到根清理:
-            # 1. scheduler_plan_tasks → scheduler_plans
-            c.execute("""
-                DELETE spt FROM scheduler_plan_tasks spt
-                INNER JOIN scheduler_plans sp ON spt.plan_id = sp.id
-                WHERE sp.inspection_plan_id = %s
-            """, [plan_id])
-            # 2. scheduler_plan_executions → scheduler_plans
-            c.execute("""
-                DELETE pe FROM scheduler_plan_executions pe
-                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
-                WHERE sp.inspection_plan_id = %s
-            """, [plan_id])
-            # 3. scheduler_task_instances → scheduler_plan_executions → scheduler_plans
+            # 1. scheduler_task_instances（叶子，FK→plan_tasks 和 plan_executions，必须先删）
             c.execute("""
                 DELETE ti FROM scheduler_task_instances ti
                 INNER JOIN scheduler_plan_executions pe ON ti.plan_execution_id = pe.id
                 INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
                 WHERE sp.inspection_plan_id = %s
             """, [plan_id])
+            # 2. scheduler_plan_tasks → scheduler_plans（task_instances 已清，FK 不再阻止）
+            c.execute("""
+                DELETE spt FROM scheduler_plan_tasks spt
+                INNER JOIN scheduler_plans sp ON spt.plan_id = sp.id
+                WHERE sp.inspection_plan_id = %s
+            """, [plan_id])
+            # 3. scheduler_plan_executions → scheduler_plans
+            c.execute("""
+                DELETE pe FROM scheduler_plan_executions pe
+                INNER JOIN scheduler_plans sp ON pe.plan_id = sp.id
+                WHERE sp.inspection_plan_id = %s
+            """, [plan_id])
             # 4. scheduler_plans → inspection_plans
             c.execute("DELETE FROM scheduler_plans WHERE inspection_plan_id = %s", [plan_id])
-            # 5. inspection_tasks 的子表（先删叶子，因为它们 FK 指向 inspection_tasks）
+            # 5. inspection_tasks 的子表（先删叶子，因为它们的 FK 指向 inspection_tasks）
             c.execute("""
                 DELETE ir FROM inspection_records ir
                 INNER JOIN inspection_tasks it ON ir.task_id = it.id
@@ -749,6 +751,47 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
                 'result_message': f'运行时间: {v}' if v else '无法获取'
             })
         
+        # ====== 时间同步 ======
+        # hrSystemDate (HOST-RESOURCES-MIB, 1.3.6.1.2.1.25.1.2.0)
+        # 只需 SNMP 只读 community，不用登录服务器（避免 SSH 高权限）
+        if 'TIME_SYNC' in codes:
+            from apps.inspection.time_check import (
+                TIME_SYNC_OID, parse_snmp_dateandtime,
+                offset_from_samples, time_sync_failure, get_threshold,
+            )
+            threshold = get_threshold(check_items)
+            samples, device_time = [], ''
+            # 先读一次；成功再补两次读数（部分设备时间精度只到秒，单次读数带
+            # 最多 1 秒截断误差，多次取样取最接近 0 的一次更接近真值）
+            # ⚠️ 每次读数都要记下当时的本机时间（往返中点），否则早采的样本会
+            #    被算进采样间隔，偏差凭空变大
+            import time as _time
+            for extra_round in range(3):
+                t0 = _time.time()
+                raw = snmp_get(TIME_SYNC_OID)
+                t1 = _time.time()
+                dt, tz = parse_snmp_dateandtime(raw)
+                if dt:
+                    samples.append((dt, tz, (t0 + t1) / 2))
+                    if not device_time:
+                        device_time = (dt.strftime('%Y-%m-%d %H:%M:%S')
+                                       + (f' {tz}' if tz else ''))
+                else:
+                    break          # 读不到就不必重试
+            if not samples:
+                status, value, message, suggestion = time_sync_failure(
+                    f'未取到 hrSystemDate（设备可能不支持该OID）: {raw or "无响应"}')
+            else:
+                status, value, message, suggestion = offset_from_samples(
+                    samples, 'SNMP hrSystemDate',
+                    extra=f'设备时间 {device_time}', threshold=threshold,
+                )
+            results.append({
+                'check_item': '时间同步', 'check_item_code': 'TIME_SYNC',
+                'status': status, 'result_value': value,
+                'result_message': message, 'suggestion': suggestion,
+            })
+        
         # ====== CPU使用率 ======
         # 优先使用 hrProcessorLoad (HOST-RESOURCES-MIB)
         #   - Windows Server: 支持 (hrProcessorLoad)
@@ -894,7 +937,7 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
                 results.append({
                     'check_item': '磁盘使用率', 'check_item_code': 'DISK_USAGE',
                     'status': worst_status,
-                    'result_value': f'{len(disk_items)}个磁盘, 最高{max_pct}%',
+                    'result_value': f'最高{max_pct}% ({len(disk_items)}个磁盘)',
                     'result_message': '\n'.join(details),
                     'suggestion': '磁盘空间不足: ' + ', '.join(warnings) if warnings else ''
                 })
@@ -915,7 +958,7 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
                     results.append({
                         'check_item': '磁盘使用率', 'check_item_code': 'DISK_USAGE',
                         'status': status,
-                        'result_value': f'{len(items)}个分区, 最高{max_pct}%',
+                        'result_value': f'最高{max_pct}% ({len(items)}个分区)',
                         'result_message': '\n'.join(items)
                     })
                 else:
@@ -1123,7 +1166,7 @@ class InspectionTaskViewSet(viewsets.ModelViewSet):
     def execute_db_inspection(self, request, pk=None):
         """执行数据库巡检（支持自定义SQL）"""
         task = self.get_object()
-        custom_sql = request.data.get('custom_sql', None)
+        custom_sql = request.data.get('custom_sql', None) if request.data else None
 
         # 更新状态
         task.status = 'in_progress'
@@ -1249,8 +1292,30 @@ class InspectionViewSet(viewsets.ModelViewSet):
     
     queryset = Inspection.objects.select_related('customer', 'asset').prefetch_related('items').all().order_by('-created_at')
     serializer_class = InspectionSerializer
-    filterset_fields = ['status', 'inspection_type']
     pagination_class = RestFrameworkPageNumberPagination
+    
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # 状态过滤
+        st = self.request.query_params.get('status')
+        if st:
+            qs = qs.filter(status=st)
+        # 类型过滤
+        tp = self.request.query_params.get('inspection_type')
+        if tp:
+            qs = qs.filter(inspection_type=tp)
+        # 资产过滤
+        asset_id = self.request.query_params.get('asset_id')
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        # 时间范围过滤
+        date_from = self.request.query_params.get('date_from')
+        if date_from:
+            qs = qs.filter(created_at__gte=date_from)
+        date_to = self.request.query_params.get('date_to')
+        if date_to:
+            qs = qs.filter(created_at__lte=date_to)
+        return qs
     
     @action(detail=False, methods=['post'], url_path='batch-delete')
     def batch_delete(self, request):
@@ -1260,3 +1325,50 @@ class InspectionViewSet(viewsets.ModelViewSet):
             return Response({'error': '请提供要删除的ID列表'}, status=400)
         deleted, _ = Inspection.objects.filter(id__in=ids).delete()
         return Response({'deleted': deleted})
+
+    @action(detail=False, methods=['get'], url_path='generate-report')
+    def generate_report(self, request):
+        """按时间范围生成客户巡检服务报告 HTML（博越版式：概览/资产清单/分系统设备检查）
+
+        客户名称/地址/联系人取自巡检记录关联的 Customer（租户实例客户信息），
+        数据全部来自巡检记录与资产，不写死客户名称，测试/异地租户代码一致。
+        支持 ?customer_id= 过滤；缺省汇总时间范围内所有客户。
+        """
+        from django.http import HttpResponse
+        from django.utils import timezone
+
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+        if not date_from or not date_to:
+            return Response({'error': '请提供 date_from 和 date_to 参数'}, status=400)
+
+        qs = Inspection.objects.filter(
+            created_at__gte=date_from,
+            created_at__lte=date_to,
+        ).select_related('asset', 'customer').prefetch_related('items')
+
+        customer_id = request.query_params.get('customer_id')
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
+        qs = qs.order_by('customer_id', 'asset_id', 'started_at', 'created_at')
+
+        inspections = list(qs)
+        if not inspections:
+            return Response({'error': '所选时间段内没有巡检记录'}, status=404)
+
+        from apps.inspection.report_builder import build_report_html
+        now_str = timezone.localtime(timezone.now()).strftime('%Y-%m-%d %H:%M:%S')
+        html_content = build_report_html(inspections, date_from, date_to, now_str)
+
+        # 文件名用客户名（单客户时），多客户用通用名
+        customers = {i.customer for i in inspections if i.customer}
+        if len(customers) == 1:
+            cname = next(iter(customers)).customer_name
+            filename = f'{cname}-数据中心巡检报告_{date_from}_{str(date_to)[:10]}.html'
+        else:
+            filename = f'数据中心巡检报告_{date_from}_{str(date_to)[:10]}.html'
+
+        response = HttpResponse(html_content, content_type='text/html; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+

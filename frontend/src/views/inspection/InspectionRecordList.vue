@@ -2,9 +2,17 @@
   <div class="inspection-records">
     <div class="page-header">
       <h2>巡检记录</h2>
-      <el-button type="primary" @click="refreshData" :loading="loading">
-        <el-icon><Refresh /></el-icon> 刷新
-      </el-button>
+      <div>
+        <el-button type="warning" @click="showGenerateReport" style="margin-right:8px">
+          <el-icon><Document /></el-icon> 生成巡检报告
+        </el-button>
+        <el-button type="danger" @click="handleBatchDelete" :disabled="!selectedRows.length">
+          <el-icon><Delete /></el-icon> 批量删除{{ selectedRows.length ? `(${selectedRows.length})` : '' }}
+        </el-button>
+        <el-button type="primary" @click="refreshData" :loading="loading">
+          <el-icon><Refresh /></el-icon> 刷新
+        </el-button>
+      </div>
     </div>
 
     <!-- 统计卡片 -->
@@ -23,7 +31,7 @@
       </el-col>
       <el-col :span="6">
         <el-card class="stat-card">
-          <div class="stat-value text-success">{{ stats.pass_count }}</div>
+          <div class="stat-value text-success">{{ stats.qualified_count }}</div>
           <div class="stat-label">合格</div>
         </el-card>
       </el-col>
@@ -60,46 +68,55 @@
 
     <!-- 记录列表 -->
     <el-card class="table-card">
-      <el-table :data="tableData" v-loading="loading" stripe @row-click="showDetail" style="cursor: pointer">
+      <el-table :data="tableData" v-loading="loading" stripe @row-click="showDetail" style="cursor: pointer" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="40" />
         <el-table-column prop="created_at" label="巡检时间" width="170">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="asset_name" label="资产" min-width="140" />
+        <el-table-column prop="name" label="巡检名称" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="inspection_type" label="类型" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag size="small">{{ row.inspection_type }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="检查结果" min-width="200">
           <template #default="{ row }">
             <div class="progress-bar-container">
               <div class="progress-bar">
-                <div class="bar-pass" :style="{ width: getPercent(row.pass_checks, row.total_checks) + '%' }"></div>
-                <div class="bar-warn" :style="{ width: getPercent(row.warning_checks, row.total_checks) + '%' }"></div>
-                <div class="bar-fail" :style="{ width: getPercent(row.fail_checks, row.total_checks) + '%' }"></div>
+                <div class="bar-pass" :style="{ width: getPercent(row.passed_items, row.total_items) + '%' }"></div>
+                <div class="bar-warn" :style="{ width: getPercent(row.warning_items, row.total_items) + '%' }"></div>
+                <div class="bar-fail" :style="{ width: getPercent(row.failed_items, row.total_items) + '%' }"></div>
               </div>
               <div class="progress-labels">
-                <span class="pass">✅{{ row.pass_checks }}</span>
-                <span class="warn" v-if="row.warning_checks">⚠️{{ row.warning_checks }}</span>
-                <span class="fail" v-if="row.fail_checks">❌{{ row.fail_checks }}</span>
+                <span class="pass">✅{{ row.passed_items || 0 }}</span>
+                <span class="warn" v-if="row.warning_items">⚠️{{ row.warning_items }}</span>
+                <span class="fail" v-if="row.failed_items">❌{{ row.failed_items }}</span>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="结果" width="100" align="center">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.overall_status)" effect="dark" round>
-              {{ row.overall_status_display }}
+            <el-tag :type="row.status === 'COMPLETED' ? 'success' : row.status === 'FAILED' ? 'danger' : 'info'" effect="dark" round>
+              {{ row.status === 'COMPLETED' ? '完成' : row.status === 'FAILED' ? '失败' : row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="duration" label="耗时" width="80" align="center">
+        <el-table-column prop="duration_ms" label="耗时" width="80" align="center">
           <template #default="{ row }">
-            {{ row.duration ? row.duration + 's' : '-' }}
+            {{ row.duration_ms ? (row.duration_ms / 1000).toFixed(1) + 's' : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="summary" label="总结" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="80" fixed="right">
+        <el-table-column prop="summary" label="总结" min-width="180" show-overflow-tooltip />
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="showDetail(row)">
               <el-icon><View /></el-icon> 详情
+            </el-button>
+            <el-button link type="danger" @click.stop="handleDelete(row)">
+              <el-icon><Delete /></el-icon>
             </el-button>
           </template>
         </el-table-column>
@@ -119,8 +136,8 @@
         <div class="detail-header">
           <div class="detail-overview">
             <div class="overview-item">
-              <span class="label">资产</span>
-              <span class="value">{{ currentRecord.asset_name }}</span>
+              <span class="label">巡检名称</span>
+              <span class="value">{{ currentRecord.name }}</span>
             </div>
             <div class="overview-item">
               <span class="label">时间</span>
@@ -128,25 +145,25 @@
             </div>
             <div class="overview-item">
               <span class="label">耗时</span>
-              <span class="value">{{ currentRecord.duration || 0 }}秒</span>
+              <span class="value">{{ currentRecord.duration_ms ? (currentRecord.duration_ms / 1000).toFixed(1) + '秒' : '-' }}</span>
             </div>
             <div class="overview-item">
-              <span class="label">结果</span>
-              <el-tag :type="getStatusType(currentRecord.overall_status)" effect="dark">
-                {{ currentRecord.overall_status_display }}
+              <span class="label">状态</span>
+              <el-tag :type="currentRecord.status === 'COMPLETED' ? 'success' : currentRecord.status === 'FAILED' ? 'danger' : 'info'" effect="dark">
+                {{ currentRecord.status === 'COMPLETED' ? '完成' : currentRecord.status === 'FAILED' ? '失败' : currentRecord.status }}
               </el-tag>
             </div>
           </div>
           <!-- 结果统计条 -->
           <div class="result-bar">
-            <div class="bar-item pass" :style="{ flex: currentRecord.pass_checks }">
-              <span v-if="currentRecord.pass_checks">{{ currentRecord.pass_checks }} 通过</span>
+            <div class="bar-item pass" :style="{ flex: currentRecord.passed_items || 0 }">
+              <span v-if="currentRecord.passed_items">{{ currentRecord.passed_items }} 通过</span>
             </div>
-            <div class="bar-item warn" :style="{ flex: currentRecord.warning_checks }">
-              <span v-if="currentRecord.warning_checks">{{ currentRecord.warning_checks }} 警告</span>
+            <div class="bar-item warn" :style="{ flex: currentRecord.warning_items || 0 }">
+              <span v-if="currentRecord.warning_items">{{ currentRecord.warning_items }} 警告</span>
             </div>
-            <div class="bar-item fail" :style="{ flex: currentRecord.fail_checks }">
-              <span v-if="currentRecord.fail_checks">{{ currentRecord.fail_checks }} 异常</span>
+            <div class="bar-item fail" :style="{ flex: currentRecord.failed_items || 0 }">
+              <span v-if="currentRecord.failed_items">{{ currentRecord.failed_items }} 异常</span>
             </div>
           </div>
         </div>
@@ -156,37 +173,57 @@
         <!-- 检查项列表 -->
         <h4 class="section-title">检查项明细</h4>
         <div class="result-list">
-          <div v-for="r in recordResults" :key="r.id" class="result-item" :class="r.status">
+          <div v-for="(r, idx) in (currentRecord.items || [])" :key="idx" class="result-item" :class="r.result.toLowerCase()">
             <div class="result-header">
               <span class="result-icon">
-                {{ r.status === 'pass' ? '✅' : r.status === 'warning' ? '⚠️' : '❌' }}
+                {{ r.result === 'PASS' ? '✅' : r.result === 'WARNING' ? '⚠️' : '❌' }}
               </span>
-              <span class="result-name">{{ r.check_item }}</span>
-              <el-tag :type="getResultTagType(r.status)" size="small" round>
-                {{ r.status_display }}
+              <span class="result-name">{{ r.item_name }}</span>
+              <el-tag :type="getResultTagType(r.result === 'PASS' ? 'pass' : r.result === 'WARNING' ? 'warning' : 'fail')" size="small" round>
+                {{ r.result === 'PASS' ? '通过' : r.result === 'WARNING' ? '警告' : '失败' }}
               </el-tag>
             </div>
             <div class="result-body">
               <div class="result-value">
-                <span class="label">检查值：</span>
-                <span class="value">{{ r.result_value }}</span>
+                <span class="label">实际值：</span>
+                <span class="value">{{ r.actual_value }}</span>
               </div>
-              <div class="result-message" v-if="r.result_message">
+              <div class="result-message" v-if="r.message">
                 <span class="label">详情：</span>
-                <pre class="message-text">{{ r.result_message }}</pre>
+                <pre class="message-text">{{ r.message }}</pre>
               </div>
               <div class="result-expected" v-if="r.expected_value">
                 <span class="label">期望值：</span>
                 <span>{{ r.expected_value }}</span>
               </div>
-              <div class="result-suggestion" v-if="r.suggestion">
-                <el-icon><Warning /></el-icon>
-                <span>{{ r.suggestion }}</span>
-              </div>
             </div>
+          </div>
+          <div v-if="!currentRecord.items || currentRecord.items.length === 0" style="color: #999; text-align: center; padding: 20px">
+            暂无检查项数据
           </div>
         </div>
       </div>
+    </el-dialog>
+
+    <!-- 生成巡检报告弹窗 -->
+    <el-dialog v-model="reportDialogVisible" title="生成巡检报告" width="500px">
+      <el-form label-width="100px">
+        <el-form-item label="时间范围" required>
+          <el-date-picker v-model="reportDateRange" type="daterange" range-separator="至"
+            start-placeholder="开始日期" end-placeholder="结束日期" style="width:100%" />
+        </el-form-item>
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            将汇总该时间段内所有巡检记录及其检查项详情，生成一个 Markdown 格式的巡检报告文件
+          </template>
+        </el-alert>
+      </el-form>
+      <template #footer>
+        <el-button @click="reportDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="downloadReport" :loading="reportLoading">
+          <el-icon><Download /></el-icon> 下载报告
+        </el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -200,13 +237,26 @@ import axios from '@/utils/axios'
 const loading = ref(false)
 const detailVisible = ref(false)
 const tableData = ref([])
-const recordResults = ref([])
 const currentRecord = ref(null)
 const assets = ref([])
+const selectedRows = ref([])
 
-const stats = reactive({ total_records: 0, today_records: 0, pass_count: 0, fail_count: 0, warning_count: 0 })
+const stats = reactive({ total_records: 0, today_records: 0, pass_count: 0, fail_count: 0, warning_count: 0, qualified_count: 0 })
 const pagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const filters = reactive({ asset: null, status: null, dateRange: null })
+
+// 生成巡检报告
+const reportDialogVisible = ref(false)
+const reportDateRange = ref(null)
+const reportLoading = ref(false)
+
+function formatDate(d) {
+  if (!d) return ''
+  const dt = new Date(d)
+  return dt.getFullYear() + '-' +
+    String(dt.getMonth() + 1).padStart(2, '0') + '-' +
+    String(dt.getDate()).padStart(2, '0')
+}
 
 function formatDateTime(dt) {
   if (!dt) return '-'
@@ -229,25 +279,80 @@ function getResultTagType(status) {
 async function loadAssets() {
   try {
     const res = await axios.get('/api/assets/assets/', { params: { page_size: 100 } })
-    assets.value = res.results || res.data?.results || []
+    if (Array.isArray(res)) {
+      assets.value = res
+    } else if (Array.isArray(res.data)) {
+      assets.value = res.data
+    } else {
+      assets.value = res.results || res.data?.results || []
+    }
   } catch { /* ignore */ }
 }
 
-async function loadStatistics() {
+function showGenerateReport() {
+  // 如果筛选器已有日期范围，自动带入
+  if (filters.dateRange && filters.dateRange.length === 2) {
+    reportDateRange.value = [filters.dateRange[0], filters.dateRange[1]]
+  } else {
+    reportDateRange.value = null
+  }
+  reportDialogVisible.value = true
+}
+
+async function downloadReport() {
+  if (!reportDateRange.value || reportDateRange.value.length !== 2) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+  reportLoading.value = true
   try {
-    const res = await axios.get('/api/inspection/records/statistics/')
-    Object.assign(stats, res.data || res)
+    const dateFrom = formatDate(reportDateRange.value[0])
+    const dateTo = formatDate(reportDateRange.value[1]) + ' 23:59:59'
+
+    // 直接通过浏览器下载
+    const link = document.createElement('a')
+    link.href = `/api/inspection/inspections/generate-report/?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`
+    link.download = `巡检报告_${dateFrom}_${formatDate(reportDateRange.value[1])}.html`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    ElMessage.success('巡检报告下载中')
+    reportDialogVisible.value = false
+  } catch (e) {
+    ElMessage.error(`生成报告失败: ${e.message || ''}`)
+  } finally { reportLoading.value = false }
+}
+
+async function loadStatistics() {
+  // 从已加载的数据中统计
+  try {
+    const res = await axios.get('/api/inspection/inspections/', { params: { page_size: 1 } })
+    const totalCount = res.count || res.data?.count || 0
+    // 获取所有记录（用于今日/通过/失败统计）
+    const allRes = await axios.get('/api/inspection/inspections/', { params: { page_size: totalCount > 1000 ? 1000 : totalCount } })
+    const all = allRes.results || allRes.data?.results || []
+    const today = new Date().toISOString().slice(0, 10)
+    stats.total_records = totalCount
+    stats.today_records = all.filter(r => r.created_at && r.created_at.slice(0, 10) === today).length
+    stats.pass_count = all.filter(r => r.status === 'COMPLETED' && r.failed_items === 0).length
+    stats.fail_count = all.filter(r => r.status === 'FAILED' || r.failed_items > 0).length
+    stats.qualified_count = stats.pass_count
   } catch { /* ignore */ }
 }
 
 async function loadData() {
   loading.value = true
   const params = { page: pagination.page, page_size: pagination.pageSize }
-  if (filters.asset) params.asset = filters.asset
-  if (filters.status) params.overall_status = filters.status
+  if (filters.asset) params.asset_id = filters.asset
+  if (filters.status) params.status = filters.status
+  if (filters.dateRange && filters.dateRange.length === 2) {
+    params.date_from = formatDate(filters.dateRange[0])
+    params.date_to = formatDate(filters.dateRange[1]) + ' 23:59:59'
+  }
 
   try {
-    const res = await axios.get('/api/inspection/records/', { params })
+    const res = await axios.get('/api/inspection/inspections/', { params })
     tableData.value = res.results || res.data?.results || []
     pagination.total = res.count || res.data?.count || 0
   } catch {
@@ -267,16 +372,51 @@ function refreshData() {
   loadData()
 }
 
-async function showDetail(row) {
+function onSelectionChange(selection) {
+  selectedRows.value = selection
+}
+
+async function handleDelete(row) {
   try {
-    const res = await axios.get(`/api/inspection/records/${row.id}/`)
-    const data = res.data || res
-    currentRecord.value = data
-    recordResults.value = data.results || []
-    detailVisible.value = true
-  } catch {
-    ElMessage.error('加载详情失败')
+    await ElMessageBox.confirm(
+      `确定要删除巡检记录「${row.asset_name}」(${formatDateTime(row.created_at)})吗？此操作不可恢复。`,
+      '确认删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    await axios.delete(`/api/inspection/inspections/${row.id}/`)
+    ElMessage.success('删除成功')
+    loadData()
+    loadStatistics()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error('删除失败')
   }
+}
+
+async function handleBatchDelete() {
+  if (!selectedRows.value.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedRows.value.length} 条巡检记录吗？此操作不可恢复。`,
+      '确认批量删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    const ids = selectedRows.value.map(r => r.id)
+    const res = await axios.post('/api/inspection/inspections/batch-delete/', { ids })
+    ElMessage.success(`已删除 ${res.data.deleted || ids.length} 条`)
+    selectedRows.value = []
+    loadData()
+    loadStatistics()
+  } catch (error) {
+    if (error !== 'cancel') {
+      const msg = error?.response?.data?.error || error.message || '批量删除失败'
+      ElMessage.error(msg)
+    }
+  }
+}
+
+async function showDetail(row) {
+  currentRecord.value = { ...row }
+  detailVisible.value = true
 }
 
 onMounted(() => {

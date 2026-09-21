@@ -12,6 +12,7 @@ INSPECTION_CHECK_ITEMS = {
         'category': 'database',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection', 'description': '测试数据库连接是否正常'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time', 'description': '数据库服务器时间与本机偏差，超过所选阈值告警'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info', 'description': '获取MySQL版本和运行信息'},
             {'code': 'DB_SIZE', 'name': '数据库大小', 'method': 'get_database_sizes', 'description': '各数据库占用空间统计'},
             {'code': 'SESSIONS', 'name': '会话连接', 'method': 'get_session_info', 'description': '当前连接数和活跃会话'},
@@ -28,6 +29,7 @@ INSPECTION_CHECK_ITEMS = {
         'category': 'database',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection', 'description': '测试数据库连接是否正常'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time', 'description': '数据库服务器时间与本机偏差，超过所选阈值告警'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info', 'description': '获取SQL Server版本信息'},
             {'code': 'DB_LIST', 'name': '数据库列表', 'method': 'get_databases', 'description': '列出所有数据库'},
             {'code': 'DB_SIZE', 'name': '数据库文件大小', 'method': 'get_database_sizes', 'description': '数据文件和日志文件大小'},
@@ -45,6 +47,7 @@ INSPECTION_CHECK_ITEMS = {
         'category': 'database',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection', 'description': '测试数据库连接是否正常'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time', 'description': '数据库服务器时间与本机偏差，超过所选阈值告警'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info', 'description': '获取Oracle版本和实例信息'},
             {'code': 'TABLESPACE', 'name': '表空间使用率', 'method': 'get_tablespace_info', 'description': '表空间使用率检查'},
             {'code': 'DB_SIZE', 'name': '数据文件大小', 'method': 'get_database_sizes', 'description': '数据文件大小统计'},
@@ -63,6 +66,7 @@ INSPECTION_CHECK_ITEMS = {
         'category': 'database',
         'checks': [
             {'code': 'DB_CONNECTION', 'name': '数据库连接', 'method': 'check_connection', 'description': '测试数据库连接是否正常'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'get_server_time', 'description': '数据库服务器时间与本机偏差，超过所选阈值告警'},
             {'code': 'DB_VERSION', 'name': '数据库版本', 'method': 'get_server_info', 'description': '获取PostgreSQL版本'},
             {'code': 'DB_SIZE', 'name': '数据库大小', 'method': 'get_database_sizes', 'description': '数据库大小统计'},
             {'code': 'SESSIONS', 'name': '会话连接', 'method': 'get_session_info', 'description': '当前连接数'},
@@ -79,6 +83,7 @@ INSPECTION_CHECK_ITEMS = {
             {'code': 'SNMP_REACHABLE', 'name': 'SNMP可达性', 'method': 'snmp_get', 'description': 'sysDescr.0 (1.3.6.1.2.1.1.1.0)'},
             {'code': 'SYS_DESCR', 'name': '系统描述', 'method': 'snmp_get', 'description': 'sysDescr.0 - 设备型号和系统版本'},
             {'code': 'SYS_UPTIME', 'name': '运行时间', 'method': 'snmp_get', 'description': 'sysUpTime.0 (1.3.6.1.2.1.1.3.0)'},
+            {'code': 'TIME_SYNC', 'name': '时间同步', 'method': 'snmp_get', 'description': 'hrSystemDate.0 (1.3.6.1.2.1.25.1.2.0) - 与本机时间偏差，超过所选阈值告警'},
             {'code': 'CPU_USAGE', 'name': 'CPU使用率', 'method': 'snmp_get', 'description': 'UCD-SNMP: ssCpuUser/System/Idle + HOST-MIB: hrProcessorLoad'},
             {'code': 'MEM_USAGE', 'name': '内存使用率', 'method': 'snmp_walk', 'description': 'HOST-MIB: hrStorageRam + UCD-SNMP: memTotalReal/memAvailReal'},
             {'code': 'DISK_USAGE', 'name': '磁盘使用率', 'method': 'snmp_walk', 'description': 'HOST-MIB: hrStorageFixedDisk + UCD-SNMP: dskPercent'},

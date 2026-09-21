@@ -16,7 +16,21 @@ import django
 django.setup()
 
 from apps.inspection.models import InspectionTask, InspectionResult, InspectionRecord
-from apps.inspection.db_connectors import get_connector_from_asset, INSPECTION_TEMPLATES
+from apps.inspection.db_connectors import get_connector_from_asset, INSPECTION_TEMPLATES, _get_field
+from apps.inspection.time_check import offset_from_epoch, time_sync_failure, get_threshold
+
+
+def _get_ci(d, key):
+    """Case-insensitive dict lookup: 先查原样，再查大写，再查小写"""
+    if key in d:
+        return d[key]
+    upper = key.upper()
+    if upper in d:
+        return d[upper]
+    lower = key.lower()
+    if lower in d:
+        return d[lower]
+    return None
 
 
 def format_size(mb_val):
@@ -53,21 +67,56 @@ def run_inspection(task_id, custom_sql=None, db_config=None):
             from apps.inspection.db_connectors import get_connector
             connector = get_connector(db_config)
         else:
-            connector = get_connector_from_asset(asset)
+            # 如果有巡检计划协议，用它确定连接器类型
+            plan_protocol = task.plan.protocol.upper() if task.plan and task.plan.protocol else ''
+            if plan_protocol in ('MYSQL', 'MSSQL', 'ORACLE', 'POSTGRESQL'):
+                # 从资产获取连接参数，但指定协议类型
+                from apps.inspection.db_connectors import get_connector, _get_field
+                host = asset.ip_address or _get_field(asset, 'db_host') or 'localhost'
+                port = asset.port or _get_field(asset, 'db_port') or ''
+                username = asset.username or _get_field(asset, 'db_username') or ''
+                password = asset.password or _get_field(asset, 'db_password') or ''
+                database = asset.database or _get_field(asset, 'db_name') or ''
+                db_config_override = {
+                    'host': host,
+                    'port': port or {'MSSQL': '1433', 'ORACLE': '1521', 'MYSQL': '3306', 'POSTGRESQL': '5432'}.get(plan_protocol, '3306'),
+                    'username': username,
+                    'password': password,
+                    'database': database or {'MSSQL': 'master', 'ORACLE': 'ORCL', 'MYSQL': 'mysql'}.get(plan_protocol, ''),
+                    'db_type': plan_protocol,
+                }
+                connector = get_connector(db_config_override)
+            else:
+                connector = get_connector_from_asset(asset)
     except Exception as e:
         return _create_record(task, asset, [], start_time, f'无法创建连接器: {e}')
 
-    # 获取巡检模板
-    name_lower = asset.asset_name.lower()
-    if 'mssql' in name_lower or 'sql server' in name_lower:
-        db_type = 'MSSQL'
-    elif 'oracle' in name_lower:
-        db_type = 'ORACLE'
-    else:
-        db_type = 'MYSQL'
+    # 获取巡检模板 — 优先使用巡检计划的协议，其次 database_type 字段，最后资产名猜测
+    db_type = ''
+    if task.plan and task.plan.protocol:
+        proto = task.plan.protocol.upper()
+        if proto in ('MSSQL', 'ORACLE', 'MYSQL', 'POSTGRESQL'):
+            db_type = proto
+    if not db_type:
+        db_type = (_get_field(asset, 'database_type') or '').upper()
+    if not db_type:
+        name_lower = asset.asset_name.lower()
+        if 'mssql' in name_lower or 'sql server' in name_lower or 'sql' in name_lower:
+            db_type = 'MSSQL'
+        elif 'oracle' in name_lower:
+            db_type = 'ORACLE'
+        elif 'mysql' in name_lower or 'mariadb' in name_lower:
+            db_type = 'MYSQL'
+        elif 'postgres' in name_lower or 'pgsql' in name_lower:
+            db_type = 'POSTGRESQL'
+        else:
+            db_type = 'MYSQL'
 
     template = INSPECTION_TEMPLATES.get(db_type, INSPECTION_TEMPLATES['MYSQL'])
     results = []
+
+    # 时间同步阈值取自巡检计划里该检查项所选的 threshold（10/60/180 秒，默认 60）
+    time_threshold = get_threshold(task.plan.check_items if task.plan else None)
 
     # 连接测试
     conn_result = connector.check_connection()
@@ -97,7 +146,7 @@ def run_inspection(task_id, custom_sql=None, db_config=None):
 
         try:
             data = method()
-            result = _format_check_result(check['code'], check['name'], data, db_type)
+            result = _format_check_result(check['code'], check['name'], data, db_type, time_threshold)
             results.append(InspectionResult(
                 task=task, asset=asset,
                 check_item=result['name'],
@@ -156,18 +205,33 @@ def run_inspection(task_id, custom_sql=None, db_config=None):
     return _create_record(task, asset, results, start_time, '')
 
 
-def _format_check_result(code, name, data, db_type):
+def _format_check_result(code, name, data, db_type, time_threshold=60.0):
     """格式化检查结果"""
-    if code == 'DB_VERSION':
-        version = data.get('version', '未知') if isinstance(data, dict) else '未知'
+    if code == 'TIME_SYNC':
+        epoch = _get_ci(data, 'epoch') if isinstance(data, dict) else None
+        if epoch in (None, ''):
+            status, value, message, suggestion = time_sync_failure(
+                f'{db_type} 未返回服务器时间（可能不支持该查询）')
+        else:
+            status, value, message, suggestion = offset_from_epoch(
+                epoch, f'{db_type} SELECT', threshold=time_threshold)
         return {
-            'name': name, 'status': 'pass', 'value': version[:80],
-            'message': f'{db_type} 版本: {version[:60]}',
+            'name': name, 'status': status, 'value': value,
+            'message': message, 'suggestion': suggestion,
+        }
+
+    if code == 'DB_VERSION':
+        version = _get_ci(data, 'version') if isinstance(data, dict) else '未知'
+        if not version:
+            version = '未知'
+        return {
+            'name': name, 'status': 'pass', 'value': str(version)[:80],
+            'message': f'{db_type} 版本: {str(version)[:60]}',
         }
 
     elif code == 'DB_LIST':
         if isinstance(data, list):
-            names = [d.get('name', '?') for d in data[:10]]
+            names = [_get_ci(d, 'name') or '?' for d in data[:10]]
             return {
                 'name': name, 'status': 'pass',
                 'value': f'{len(data)} 个数据库',
@@ -177,12 +241,36 @@ def _format_check_result(code, name, data, db_type):
 
     elif code == 'DB_SIZE':
         if isinstance(data, list) and data:
-            total = sum(float(d.get('total_size_mb', 0) or 0) for d in data)
-            details = []
-            for d in data[:10]:
-                db_name = d.get('database_name', d.get('tablespace_name', '?'))
-                size = format_size(d.get('total_size_mb', 0))
-                details.append(f'{db_name}: {size}')
+            first = data[0]
+            # MSSQL 新格式：data_size_mb / log_size_mb（分别聚合后的结果）
+            if _get_ci(first, 'data_size_mb') is not None:
+                total_data = sum(float(_get_ci(d, 'data_size_mb') or 0) for d in data)
+                total_log = sum(float(_get_ci(d, 'log_size_mb') or 0) for d in data)
+                details = []
+                for d in data:
+                    db = _get_ci(d, 'database_name') or '?'
+                    data_sz = float(_get_ci(d, 'data_size_mb') or 0)
+                    log_sz = float(_get_ci(d, 'log_size_mb') or 0)
+                    details.append(f'{db}: 数据={format_size(data_sz)}, 日志={format_size(log_sz)}')
+                return {
+                    'name': name, 'status': 'pass',
+                    'value': f'数据={format_size(total_data)}, 日志={format_size(total_log)}',
+                    'message': '\n'.join(details[:10]),
+                }
+            # MSSQL 旧格式：按文件返回 (file_type / size_mb)
+            elif _get_ci(first, 'file_type') is not None or _get_ci(first, 'size_mb') is not None:
+                db_totals = {}
+                for d in data:
+                    db = _get_ci(d, 'database_name') or '?'
+                    if db not in db_totals:
+                        db_totals[db] = 0
+                    db_totals[db] += float(_get_ci(d, 'size_mb') or 0)
+                total = sum(db_totals.values())
+                details = [f'{db}: {format_size(size)}' for db, size in sorted(db_totals.items())[:10]]
+            else:
+                # Oracle: total_size_mb 或 total_mb
+                total = sum(float(_get_ci(d, 'total_size_mb') or _get_ci(d, 'total_mb') or 0) for d in data)
+                details = [f'{_get_ci(d, "database_name") or _get_ci(d, "tablespace_name") or "?"}: {format_size(_get_ci(d, "total_size_mb") or _get_ci(d, "total_mb") or 0)}' for d in data[:10]]
             return {
                 'name': name, 'status': 'pass',
                 'value': f'总计 {format_size(total)}',
@@ -193,23 +281,36 @@ def _format_check_result(code, name, data, db_type):
     elif code in ('TABLESPACE',):
         if isinstance(data, list) and data:
             warnings = []
+            has_usage_data = False
             for d in data:
-                pct = float(d.get('USED_PCT', d.get('used_pct', 0) or 0))
-                if pct > 85:
-                    warnings.append(f'{d.get("TABLESPACE_NAME", d.get("tablespace_name", "?"))}: {pct}%')
-            status = 'warning' if warnings else 'pass'
+                pct_raw = _get_ci(d, 'USED_PCT') or _get_ci(d, 'used_pct') or 'N/A'
+                if pct_raw == 'N/A' or not pct_raw:
+                    continue
+                try:
+                    pct = float(pct_raw)
+                    has_usage_data = True
+                    if pct > 85:
+                        warnings.append(f'{_get_ci(d, "TABLESPACE_NAME") or _get_ci(d, "tablespace_name") or "?"}: {pct}%')
+                except (ValueError, TypeError):
+                    continue
+            if has_usage_data:
+                status = 'warning' if warnings else 'pass'
+                message = f'告警: {", ".join(warnings)}' if warnings else '所有表空间使用正常'
+            else:
+                status = 'pass'
+                message = '仅有总大小（需 DBA 权限获取使用率）'
             return {
                 'name': name, 'status': status,
                 'value': f'{len(data)} 个表空间',
-                'message': f'告警: {", ".join(warnings)}' if warnings else '所有表空间使用正常',
+                'message': message,
                 'suggestion': '建议扩容或清理' if warnings else '',
             }
         return {'name': name, 'status': 'pass', 'value': '无数据', 'message': ''}
 
     elif code == 'SESSIONS':
         if isinstance(data, dict):
-            total = data.get('total_sessions', data.get('threads_connected', 0))
-            active = len(data.get('active_sessions', data.get('active_processes', [])))
+            total = _get_ci(data, 'total_sessions') or _get_ci(data, 'threads_connected') or 0
+            active = len(_get_ci(data, 'active_sessions') or _get_ci(data, 'active_processes') or [])
             return {
                 'name': name, 'status': 'pass' if int(total) < 100 else 'warning',
                 'value': f'总数 {total}, 活跃 {active}',
@@ -219,9 +320,9 @@ def _format_check_result(code, name, data, db_type):
 
     elif code in ('BUFFER_HIT',):
         if isinstance(data, dict):
-            ratio = data.get('buffer_pool_hit_ratio', data.get('buffer_cache_hit_ratio', data.get('buffer_hit_ratio', 0)))
+            ratio = _get_ci(data, 'buffer_pool_hit_ratio') or _get_ci(data, 'buffer_cache_hit_ratio') or _get_ci(data, 'buffer_hit_ratio') or 0
             ratio = float(ratio) if ratio else 0
-            status = 'pass' if ratio >= 95 else ('warning' if ratio >= 85 else 'fail')
+            status = 'pass' if ratio >= 95 else 'warning'
             return {
                 'name': name, 'status': status,
                 'value': f'{ratio}%',
@@ -234,21 +335,21 @@ def _format_check_result(code, name, data, db_type):
     elif code == 'BACKUP':
         if isinstance(data, list) and data:
             latest = data[0]
-            time_str = latest.get('last_backup_time', latest.get('START_TIME', latest.get('start_time', '?')))
+            time_str = _get_ci(latest, 'last_backup_time') or _get_ci(latest, 'START_TIME') or _get_ci(latest, 'start_time') or '?'
             return {'name': name, 'status': 'pass', 'value': f'最近: {time_str}', 'message': str(latest)}
         elif isinstance(data, dict):
-            return {'name': name, 'status': 'warning', 'value': data.get('message', '未知'), 'message': str(data)}
+            return {'name': name, 'status': 'warning', 'value': _get_ci(data, 'message') or '未知', 'message': str(data)}
         return {'name': name, 'status': 'warning', 'value': '无备份记录', 'message': ''}
 
     elif code in ('ARCHIVE_LOG',):
         if isinstance(data, dict):
-            dest = data.get('recovery_dest', {})
-            pct = float(dest.get('USED_PCT', 0) or 0)
+            dest = _get_ci(data, 'recovery_dest') or {}
+            pct = float(_get_ci(dest, 'USED_PCT') or 0)
             status = 'pass' if pct < 80 else ('warning' if pct < 95 else 'fail')
             return {
                 'name': name, 'status': status,
                 'value': f'使用率 {pct}%' if dest else '无数据',
-                'message': f'归档目标: {format_size(dest.get("USED_MB", 0))} / {format_size(dest.get("LIMIT_MB", 0))}',
+                'message': f'归档目标: {format_size(_get_ci(dest, "USED_MB") or 0)} / {format_size(_get_ci(dest, "LIMIT_MB") or 0)}',
                 'expected': '< 80%',
                 'suggestion': '' if pct < 80 else '归档空间不足，建议清理或扩容',
             }
